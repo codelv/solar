@@ -1,9 +1,20 @@
 package com.codelv.solar
 
+import android.Manifest.permission.BLUETOOTH_CONNECT
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothDevice
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.os.IBinder
+import androidx.annotation.RequiresPermission
+import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.Executor
 
 
 class AppState {
@@ -24,8 +35,9 @@ class AppState {
 
 }
 
-
 class AppViewModel : ViewModel() {
     val mutableState = MutableStateFlow(AppState())
     val state: StateFlow<AppState> = mutableState.asStateFlow()
+    var availableDevices: MutableList<BluetoothDevice> = mutableStateListOf()
+    val connectedDevices: MutableList<BluetoothDevice> = mutableStateListOf()
 }

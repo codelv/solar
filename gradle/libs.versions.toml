@@ -9,6 +9,7 @@ lifecycleRuntimeKtx = "2.8.3"
 activityCompose = "1.9.0"
 composeBom = "2024.04.01"
 vico = "2.0.0-alpha.24"
+navigationCompose = "2.7.7"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -40,6 +41,7 @@ vico-compose-m3 = { group = "com.patrykandpatrick.vico", name = "compose-m3", ve
 vico-core = { group = "com.patrykandpatrick.vico", name = "core", version.ref = "vico" }
 # For the view system.
 vico-views = { group = "com.patrykandpatrick.vico", name = "views", version.ref = "vico" }
+androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

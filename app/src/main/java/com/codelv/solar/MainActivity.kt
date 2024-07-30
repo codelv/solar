@@ -1,14 +1,10 @@
 package com.codelv.solar
 
+import android.Manifest.permission.BLUETOOTH_CONNECT
 import android.app.Activity
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
-import android.bluetooth.BluetoothSocket
-import android.companion.AssociationInfo
-import android.companion.AssociationRequest
-import android.companion.BluetoothLeDeviceFilter
-import android.companion.CompanionDeviceManager
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
@@ -16,273 +12,93 @@ import android.content.Context.RECEIVER_EXPORTED
 import android.content.ContextWrapper
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.IntentSender
 import android.content.ServiceConnection
-import android.net.MacAddress
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
 import android.os.IBinder
 import android.util.Log
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.ActivityResult
-import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
+import androidx.annotation.RequiresPermission
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.MutableState
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import com.codelv.solar.ui.theme.SolarTheme
+import com.codelv.solar.ui.theme.Typography
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
-import java.io.IOException
-import java.util.concurrent.Executor
-import java.util.regex.Pattern
+import kotlin.math.abs
+import kotlin.math.max
 
 private const val SELECT_DEVICE_REQUEST_CODE = 0
 private const val REQUEST_ENABLE_BT = 1
 
 
 class MainActivity : ComponentActivity() {
-
-    val companionDeviceManager: CompanionDeviceManager by lazy {
-        getSystemService(Context.COMPANION_DEVICE_SERVICE) as CompanionDeviceManager
-    }
+    var monitorService: MonitorService? = null;
     val bluetoothAdapter: BluetoothAdapter by lazy {
         val java = BluetoothManager::class.java
         getSystemService(java)!!.adapter
     }
-    val executor: Executor = Executor { it.run() }
-    var bluetoothDevice: MutableState<BluetoothDevice?> = mutableStateOf(null)
-    var bluetoothService: MonitorService? = null
-
-    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
-    override fun onCreate(savedInstanceState: Bundle?) {
-        val gattServiceIntent = Intent(this, MonitorService::class.java)
-        bindService(gattServiceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
-
-        super.onCreate(savedInstanceState)
-        setContent {
-            SolarTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    MainView()
-                }
-            }
-        }
-    }
 
     // Code to manage Service lifecycle.
-    private val serviceConnection: ServiceConnection = object : ServiceConnection {
+    val serviceConnection: ServiceConnection = object : ServiceConnection {
+        @RequiresPermission(BLUETOOTH_CONNECT)
         override fun onServiceConnected(
             componentName: ComponentName,
             service: IBinder
         ) {
-            bluetoothService = (service as MonitorService.LocalBinder).getService()
+            monitorService = (service as MonitorService.LocalBinder).getService()
         }
 
         override fun onServiceDisconnected(componentName: ComponentName) {
-            bluetoothService = null
+            monitorService = null
         }
     }
 
-    fun companionPairingRequest(launcher: ManagedActivityResultLauncher<IntentSenderRequest, ActivityResult>) {
-        val deviceFilter: BluetoothLeDeviceFilter = BluetoothLeDeviceFilter.Builder()
-            // Match only Bluetooth devices whose name matches the pattern.
-            .setNamePattern(Pattern.compile("BT.+"))
-            //.addServiceUuid(ParcelUuid(UUID()), null)
-            .build()
-        val pairingRequest: AssociationRequest = AssociationRequest.Builder()
-            // Find only devices that match this request filter.
-            .addDeviceFilter(deviceFilter)
-            // Stop scanning as soon as one device matching the filter is found.
-            .setSingleDevice(false)
-            .build()
-
-        // When the app tries to pair with a Bluetooth device, show the
-        // corresponding dialog box to the user.
-        companionDeviceManager.associate(pairingRequest,
-            executor,
-            object : CompanionDeviceManager.Callback() {
-                // Called when a device is found. Launch the IntentSender so the user
-                // can select the device they want to pair with.
-                override fun onAssociationPending(intentSender: IntentSender) {
-                    intentSender.let {
-                        //startIntentSenderForResult(it, SELECT_DEVICE_REQUEST_CODE, null, 0, 0, 0)
-                        val senderRequest = IntentSenderRequest.Builder(intentSender).build()
-                        launcher.launch(senderRequest)
-                    }
-                }
-
-                override fun onAssociationCreated(associationInfo: AssociationInfo) {
-                    // AssociationInfo object is created and get association id and the
-                    // macAddress.
-                    var associationId: Int = associationInfo.id
-                    var macAddress: MacAddress = associationInfo.deviceMacAddress!!
-                    Log.i("BLE", "Companion association created ${associationId}")
-                }
-
-                override fun onFailure(errorMessage: CharSequence?) {
-                    // Handle the failure.
-                    Log.e("BLE", "Companion device failed ${errorMessage}")
-                }
-
-            })
-    }
-
-    fun connectBluetoothDevice(device: BluetoothDevice) {
-        bluetoothAdapter.cancelDiscovery()
-        //device.createBond();
-        bluetoothDevice.value = device
-        bluetoothService?.connect(device)
-//        bluetoothGatt.value = device.connectGatt(this, false, object : BluetoothGattCallback() {
-//            override fun onCharacteristicChanged(
-//                gatt: BluetoothGatt,
-//                characteristic: BluetoothGattCharacteristic,
-//                value: ByteArray
-//            ) {
-//                super.onCharacteristicChanged(gatt, characteristic, value)
-//                Log.d("BLE", "Characteristic changed ${characteristic} ${value}")
-//            }
-//
-//            override fun onDescriptorRead(
-//                gatt: BluetoothGatt,
-//                descriptor: BluetoothGattDescriptor,
-//                status: Int,
-//                value: ByteArray
-//            ) {
-//                super.onDescriptorRead(gatt, descriptor, status, value)
-//                Log.d("BLE", "Descriptor read  ${descriptor} ${status} ${value}")
-//            }
-//
-//            override fun onReadRemoteRssi(gatt: BluetoothGatt?, rssi: Int, status: Int) {
-//                super.onReadRemoteRssi(gatt, rssi, status)
-//                Log.d("BLE", "Read remote rssi  ${rssi} ${status}")
-//
-//            }
-//
-//            override fun onConnectionStateChange(
-//                gatt: BluetoothGatt?,
-//                status: Int,
-//                newState: Int
-//            ) {
-//                super.onConnectionStateChange(gatt, status, newState)
-//                if (newState == BluetoothProfile.STATE_CONNECTED) {
-//                    Log.d("BLE", "Connected")
-//                    gatt?.discoverServices()
-//                    // successfully connected to the GATT Server
-//                    broadcastUpdate(ACTION_GATT_CONNECTED)
-//                } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-//                    Log.d("BLE", "Disconnected")
-//                }
-//
-//            }
-//
-//            override fun onServiceChanged(gatt: BluetoothGatt) {
-//                super.onServiceChanged(gatt)
-//                Log.d("BLE", "Service changed")
-//
-//            }
-//
-//            override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
-//                super.onServicesDiscovered(gatt, status)
-//                Log.d("BLE", "Services discovered ${status}")
-//            }
-//        })
-    }
-
-
-    inner class BluetoothThread(context: Context, device: BluetoothDevice, handler: Handler) :
-        Thread() {
-        val MESSAGE_READ = 0
-        val MESSAGE_WRITE = 1
-        val MESSAGE_ERROR = 2
-        val buf = ByteArray(1024)
-        val handler: Handler = handler
-        val device: BluetoothDevice = device
-        val bluetoothSocket: BluetoothSocket? by lazy(LazyThreadSafetyMode.NONE) {
-            device.createRfcommSocketToServiceRecord(device.uuids.first().uuid)
-        }
-
-        override fun run() {
-            bluetoothSocket?.let { socket ->
-                // Connect to the remote device through the socket. This call blocks
-                // until it succeeds or throws an exception.
-                socket.connect()
-
-                while (true) {
-                    try {
-                        val n = socket.inputStream.read(buf)
-                        val msg = handler.obtainMessage(MESSAGE_READ, n, -1, buf)
-                        msg.sendToTarget()
-                        Log.d("Bluetooth", "Read ${msg}")
-                    } catch (e: IOException) {
-                        Log.d("Bluetooth", "Input stream closed", e)
-                        break
-                    }
-                }
-            }
-        }
-
-        // Call this from the main activity to send data to the remote device.
-        fun write(bytes: ByteArray) {
-            bluetoothSocket?.let { socket ->
-                try {
-                    Log.d("Bluetooth", "Write ${bytes}")
-                    socket.outputStream.write(bytes)
-                } catch (e: IOException) {
-                    Log.e("Bluetooth", "Error occurred when sending data", e)
-
-                    // Send a failure message back to the activity.
-                    val errorMsg = handler.obtainMessage(MESSAGE_ERROR)
-                    val bundle = Bundle().apply {
-                        putString("error", "Couldn't send data to the other device")
-                    }
-                    errorMsg.data = bundle
-                    handler.sendMessage(errorMsg)
-                    return
-                }
-
-                // Share the sent message with the UI activity.
-                val msg = handler.obtainMessage(MESSAGE_WRITE, -1, -1, buf)
-                msg.sendToTarget()
-            }
-        }
-
-        // Closes the client socket and causes the thread to finish.
-        fun cancel() {
-            try {
-                bluetoothSocket?.close()
-            } catch (e: IOException) {
-                Log.e("Bluetooth", "Could not close the client socket", e)
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    override fun onCreate(savedInstanceState: Bundle?) {
+        val intent = Intent(this, MonitorService::class.java)
+        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        super.onCreate(savedInstanceState)
+        setContent {
+            SolarTheme {
+                MainView()
             }
         }
     }
-
 
 }
 
@@ -300,13 +116,32 @@ inline fun <reified Activity : ComponentActivity> Context.getActivity(): Activit
     }
 }
 
+
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
-fun MainView(appViewModel: AppViewModel = viewModel()) {
-    val state by appViewModel.state.collectAsState()
+fun MainView(state: AppViewModel = viewModel()) {
+    val nav = rememberNavController()
+    NavHost(navController = nav, startDestination = "devices") {
+        composable("devices") {
+            Log.i(TAG, "Navigate to devices creen")
+            Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                BluetoothDevicesScreen(nav, state)
+            }
+        }
+        composable("dashboard") {
+            Log.i(TAG, "Navigate to dashboard")
+            Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                DashboardScreen(nav, state)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalPermissionsApi::class)
+@Composable
+fun BluetoothDevicesScreen(nav: NavHostController, state: AppViewModel) {
     val context = LocalContext.current
     val activity = context.getActivity<MainActivity>()!!
-
     val bluetoothPermissionState = rememberMultiplePermissionsState(
         listOf(
             android.Manifest.permission.BLUETOOTH_CONNECT,
@@ -364,32 +199,64 @@ fun MainView(appViewModel: AppViewModel = viewModel()) {
         //activity.startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT)
         return
     }
-    val bluetoothPairingLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartIntentSenderForResult(),
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val deviceToPair: BluetoothDevice? =
-                result.data?.getParcelableExtra(CompanionDeviceManager.EXTRA_DEVICE)
-            deviceToPair?.let { device ->
-                device.createBond()
-                // Maintain continuous interaction with a paired device.
-                activity.bluetoothDevice.value = device
-                Log.i("BLE", "Device connected")
+
+    Column(Modifier.padding(16.dp)) {
+        Text("No charger or battery monitor is connected.")
+        Button(
+            onClick = {
+                Log.i("Bluetooth", "Start scan")
+                activity.bluetoothAdapter.startDiscovery()
+                //activity.companionPairingRequest(bluetoothPairingLauncher)
+            },
+            Modifier.fillMaxWidth()
+        ) {
+            Text("Search for devices", Modifier.padding(6.dp))
+        }
+        Text("Available devices (tap to connect)")
+        SystemBroadcastReceiver(systemActions = listOf(BluetoothDevice.ACTION_FOUND)) { intent ->
+            when (intent?.action) {
+                BluetoothDevice.ACTION_FOUND -> {
+                    val device: BluetoothDevice =
+                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)!!
+                    Log.i("Bluetooth", "Found ${device}")
+                    if (!state.availableDevices.contains(device)) {
+                        state.availableDevices.add(device)
+                    }
+                }
+                else -> {}
             }
-        } else {
-            Log.i("BLE", "Pairing request cancelled")
+        }
+        state.availableDevices.forEach({ device ->
+            var name: String? = device.name
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .padding(16.dp)
+                    .fillMaxWidth()
+                    .clickable(onClick = {
+                        if (!state.connectedDevices.contains(device)) {
+                            Log.d(TAG, "New bluetooth connection")
+                            state.connectedDevices.add(device)
+                            activity.monitorService?.connect(device)
+                        }
+
+                    })
+                    .fillMaxWidth()
+            ) {
+                Text(if (name != null) name else "Unamed device")
+                if (state.connectedDevices.contains(device)) {
+                    Text("Connected", style= Typography.labelSmall)
+                }
+            }
+            HorizontalDivider()
+        })
+        Button(onClick = {
+            activity.bluetoothAdapter?.cancelDiscovery()
+            nav.navigate("dashboard")
+        }, modifier = Modifier.fillMaxWidth()) {
+            Text(text = "Go to dashboard", Modifier.padding(4.dp))
         }
     }
-
-    if (activity.bluetoothDevice.value == null) {
-        BluetoothScanView(state = state)
-        return
-    }
-    if (activity.bluetoothService?.connectionState?.value == STATE_CONNECTED) {
-        BatteryMonitorView(state = state)
-        return
-    }
-    Text("Connecting...")
 }
 
 @Composable
@@ -416,79 +283,61 @@ fun SystemBroadcastReceiver(
 }
 
 @Composable
-fun BluetoothScanView(state: AppState) {
+fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
     val context = LocalContext.current
     val activity = context.getActivity<MainActivity>()!!
-    var bluetoothDevices = remember { mutableStateListOf<BluetoothDevice>() }
-    Column(Modifier.padding(16.dp)) {
-        Text("No charger or battery monitor is connected.")
-        Button(
-            onClick = {
-                Log.i("Bluetooth", "Start scan")
-                activity.bluetoothAdapter.startDiscovery()
-                //activity.companionPairingRequest(bluetoothPairingLauncher)
-            },
-            Modifier.fillMaxWidth()
-        ) {
-            Text("Search for devices", Modifier.padding(6.dp))
-        }
-        Text("Available devices (tap to connect)")
 
-        SystemBroadcastReceiver(systemActions = listOf(BluetoothDevice.ACTION_FOUND)) { intent ->
-            when (intent?.action) {
-                BluetoothDevice.ACTION_FOUND -> {
-                    val device: BluetoothDevice =
-                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)!!
-                    Log.i("Bluetooth", "Found ${device}")
-                    if (!bluetoothDevices.contains(device)) {
-                        bluetoothDevices.add(device)
-                    }
-                }
-//                BluetoothDevice.ACTION_UUID -> {
-//                    val device: BluetoothDevice =
-//                        intent?.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)!!
-//                    val uuids: Array<ParcelUuid>? = device.uuids;
-//                    if (uuids != null) {
-//                        for (uuid in uuids) {
-//                            Log.i("Bluetooth", "Found ${device} service ${uuid}")
-//                            if (uuid.toString().startsWith("0000FFE0-0000-1000-8000")) {
-//                                if (!bluetoothDevices.contains(device!!)) {
-//                                    bluetoothDevices.add(device!!)
-//                                }
-//                                break;
-//                            }
-//                        }
-//                    } else {
-//                        Log.w("Bluetooth", "No uuids fetched")
-//                    }
-//                }
-                else -> {}
-            }
-        }
-        bluetoothDevices.forEach({ device ->
-            var name: String? = device.name
-            Row(
-                Modifier
-                    .padding(16.dp)
-                    .clickable(onClick = { activity.connectBluetoothDevice(device) })
-                    .fillMaxWidth()
-            ) {
-                Text(if (name != null) name else "Unamed device")
-            }
-            HorizontalDivider()
-        })
-    }
-}
+    var solarVoltage by remember { mutableStateOf(0.0) }
+    var chargeVoltage by remember { mutableStateOf(0.0) }
+    var chargeCurrent by remember { mutableStateOf(0.0) }
+    var chargeEnergy by remember { mutableStateOf(0.0) }
+    var chargerTemp by remember { mutableStateOf(0) }
+    var solarPeakPower by remember { mutableStateOf(0.0) }
 
-@Composable
-fun BatteryMonitorView(state: AppState) {
-    val context = LocalContext.current
-    val activity = context.getActivity<MainActivity>()!!
+    var batteryRemainingAh by remember { mutableStateOf(0.0) }
+    var batteryCharging by remember{ mutableStateOf(false) }
     var batteryCurrent by remember{ mutableStateOf(0.0) }
     var batteryVoltage by remember{ mutableStateOf(0.0) }
+    var batteryTotalChargeEnergy by remember{ mutableStateOf(0.0) }
+    var batteryTotalDischargeEnergy by remember{ mutableStateOf(0.0) }
+    var batteryCapacity by remember{ mutableStateOf(0.0) }
+    var batteryTimeRemaining by remember{ mutableStateOf(0) }
+    var inverterCurrent = abs(chargeCurrent - batteryCurrent);
+    var inverterPower = inverterCurrent * max(chargeVoltage, batteryVoltage);
+    var inverterEnergy = max(0.0, chargeEnergy - batteryTotalChargeEnergy);
+    var chargePower = chargeVoltage * chargeCurrent;
+    var solarCurrent = if (solarVoltage > 0) chargePower / solarVoltage else 0.0;
 
-    SystemBroadcastReceiver(systemActions = listOf(MonitorService.ACTION_BATTERY_MONITOR_DATA_AVAILABLE)) { intent ->
+    SystemBroadcastReceiver(systemActions = listOf(MonitorService.ACTION_BATTERY_MONITOR_DATA_AVAILABLE, MonitorService.ACTION_SOLAR_CHARGER_DATA_AVAILABLE)) { intent ->
         when (intent?.action) {
+            MonitorService.ACTION_SOLAR_CHARGER_DATA_AVAILABLE -> {
+                val type =
+                    SolarChargerDataType.fromInt(
+                        intent.getIntExtra(MonitorService.SOLAR_CHARGER_DATA_TYPE, 0)
+                    )
+                when (type) {
+                    SolarChargerDataType.SolarVoltage -> {
+                        solarVoltage = intent.getDoubleExtra(MonitorService.SOLAR_CHARGER_DATA_VALUE, 0.0)
+                    }
+                    SolarChargerDataType.ChargeVoltage -> {
+                        chargeVoltage = intent.getDoubleExtra(MonitorService.SOLAR_CHARGER_DATA_VALUE, 0.0)
+                    }
+                    SolarChargerDataType.ChargeCurrent -> {
+                        chargeCurrent = intent.getDoubleExtra(MonitorService.SOLAR_CHARGER_DATA_VALUE, 0.0)
+                    }
+                    SolarChargerDataType.TodayChargeEnergy -> {
+                        chargeEnergy = intent.getDoubleExtra(MonitorService.SOLAR_CHARGER_DATA_VALUE, 0.0)
+                    }
+                    SolarChargerDataType.TodayPeakPower -> {
+                        solarPeakPower = intent.getDoubleExtra(MonitorService.SOLAR_CHARGER_DATA_VALUE, 0.0)
+
+                    }
+                    SolarChargerDataType.ChargerTemp -> {
+                        chargerTemp = intent.getIntExtra(MonitorService.SOLAR_CHARGER_DATA_VALUE, 0)
+                    }
+                    else -> {}
+                }
+            }
             MonitorService.ACTION_BATTERY_MONITOR_DATA_AVAILABLE -> {
                 val type =
                     BatteryMonitorDataType.fromInt(
@@ -496,15 +345,29 @@ fun BatteryMonitorView(state: AppState) {
                     )
                 when (type) {
                     BatteryMonitorDataType.Voltage -> {
-                        // TOOD
                         batteryVoltage = intent.getDoubleExtra(MonitorService.BATTERY_MONITOR_DATA_VALUE, 0.0)
                     }
-
                     BatteryMonitorDataType.Current -> {
-                        // TOOD
                         batteryCurrent = intent.getDoubleExtra(MonitorService.BATTERY_MONITOR_DATA_VALUE, 0.0)
                     }
-
+                    BatteryMonitorDataType.IsCharging -> {
+                        batteryCharging = intent.getBooleanExtra(MonitorService.BATTERY_MONITOR_DATA_VALUE, false)
+                    }
+                    BatteryMonitorDataType.RemainingAh -> {
+                        batteryRemainingAh = intent.getDoubleExtra(MonitorService.BATTERY_MONITOR_DATA_VALUE, 0.0)
+                    }
+                    BatteryMonitorDataType.TotalChargeEnergy -> {
+                        batteryTotalChargeEnergy = intent.getDoubleExtra(MonitorService.BATTERY_MONITOR_DATA_VALUE, 0.0)
+                    }
+                    BatteryMonitorDataType.TotalDischargeEnergy -> {
+                        batteryTotalDischargeEnergy = intent.getDoubleExtra(MonitorService.BATTERY_MONITOR_DATA_VALUE, 0.0)
+                    }
+                    BatteryMonitorDataType.BatteryCapacity -> {
+                        batteryCapacity = intent.getDoubleExtra(MonitorService.BATTERY_MONITOR_DATA_VALUE, 0.0)
+                    }
+                    BatteryMonitorDataType.RemainingTimeInMinutes -> {
+                        batteryTimeRemaining = intent.getIntExtra(MonitorService.BATTERY_MONITOR_DATA_VALUE, 0)
+                    }
                     else -> {
                     }
                 }
@@ -513,71 +376,216 @@ fun BatteryMonitorView(state: AppState) {
             else -> {}
         }
     }
-    Column(Modifier.padding(16.dp)) {
-        if (activity.bluetoothService?.deviceType?.value == DeviceType.BatteryMonitor) {
-            Text("Battery monitor")
-        } else if (activity.bluetoothService?.deviceType?.value == DeviceType.SolarCharger) {
-            Text("Solar charger")
-        }
-        Row {
+    Column(
+        Modifier
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Column(Modifier.padding(8.dp)){
             Text(
-                text = "Solar"
+                text = "Solar Panels",
+                style = Typography.headlineSmall,
+                fontWeight = FontWeight.Light
             )
-            Row(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "${state.solarVoltage}V",
-                    Modifier.padding(4.dp)
-                )
-                Text(
-                    text = "${state.solarCurrent}A",
-                    Modifier.padding(4.dp)
-                )
-
-                Text(
-                    text = "${state.solarPower}W",
-                    Modifier.padding(4.dp)
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(
+                    Modifier
+                        .padding(8.dp)
+                        .fillMaxWidth()
+                        .weight(1f)) {
+                    Text("Voltage", style = Typography.labelSmall)
+                    Text(
+                        text = "${solarVoltage}V",
+                        style = Typography.headlineSmall
+                    )
+                    Text("Current", style = Typography.labelSmall)
+                    Text(
+                        text = "${"%.2f".format(solarCurrent)}A",
+                        style = Typography.headlineSmall
+                    )
+                }
+                Column(
+                    Modifier
+                        .padding(8.dp)
+                        .fillMaxWidth()
+                        .weight(1f)) {
+                    Text("Energy", style = Typography.labelSmall)
+                    Text(
+                        text = "${"%.0f".format(chargeEnergy)}Wh",
+                        style = Typography.displaySmall
+                    )
+                    Text("Peak power", style = Typography.labelSmall)
+                    Text(
+                        text = "${"%.0f".format(solarPeakPower)}W",
+                        style = Typography.bodyLarge
+                    )
+                }
             }
         }
-        Row {
+        HorizontalDivider()
+        Column(Modifier.padding(8.dp)){
             Text(
-                text = "Charger"
+                text = "Charger",
+                style = Typography.headlineSmall,
+                fontWeight = FontWeight.Light
             )
-            Row(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "${state.chargeVoltage}V",
-                    Modifier.padding(4.dp)
-                )
-                Text(
-                    text = "${state.chargeCurrent}A",
-                    Modifier.padding(4.dp)
-                )
-
-                Text(
-                    text = "${state.chargePower}W",
-                    Modifier.padding(4.dp)
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.padding(8.dp).fillMaxWidth()
+                    .weight(1f)) {
+                    Text("Voltage", style = Typography.labelSmall)
+                    Text(
+                        text = "${"%.2f".format(chargeVoltage)}A",
+                        style = Typography.headlineSmall
+                    )
+                    Text("Current", style = Typography.labelSmall)
+                    Text(
+                        text = "${"%.2f".format(chargeCurrent)}A",
+                        style = Typography.headlineSmall
+                    )
+                }
+                Column(Modifier.padding(8.dp).fillMaxWidth()
+                    .weight(1f)) {
+                    Text("Power", style = Typography.labelSmall)
+                    Text(
+                        text = "${"%.0f".format(chargePower)}W",
+                        style = Typography.displaySmall
+                    )
+                    Text("Temperature", style = Typography.labelSmall)
+                    Text(
+                        text = "${chargerTemp}°C | ${"%.0f".format(chargerTemp.toFloat()*9.0/5.0+32)}°F",
+                        style = Typography.bodyLarge
+                    )
+                }
             }
         }
-        Row {
+        HorizontalDivider()
+        Column(Modifier.padding(8.dp)){
             Text(
-                text = "Battery"
+                text = "Inverter",
+                style = Typography.headlineSmall,
+                fontWeight = FontWeight.Light
             )
-            Row(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "${"%.2f".format(batteryVoltage)}V",
-                    Modifier.padding(4.dp)
-                )
-                Text(
-                    text = "${"%.2f".format(batteryCurrent)}A",
-                    Modifier.padding(4.dp)
-                )
-
-                Text(
-                    text = "${"%.2f".format(batteryVoltage*batteryCurrent)}W",
-                    Modifier.padding(4.dp)
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.padding(8.dp).fillMaxWidth()
+                    .weight(1f)) {
+                    Text("Current", style = Typography.labelSmall)
+                    Text(
+                        text = "${"%.2f".format(inverterCurrent)}A",
+                        style = Typography.headlineSmall
+                    )
+                }
+                Column(Modifier.padding(8.dp).fillMaxWidth()
+                    .weight(1f)) {
+                    Text("Power", style = Typography.labelSmall)
+                    Text(
+                        text = "${"%.0f".format(inverterPower)}W",
+                        style = Typography.headlineSmall
+                    )
+                }
+                Column(Modifier.padding(8.dp).fillMaxWidth()
+                    .weight(2f)) {
+                    Text("Energy", style = Typography.labelSmall)
+                    Text(
+                        text = "${"%.0f".format(inverterEnergy)}Wh",
+                        style = Typography.displaySmall
+                    )
+                }
             }
+        }
+        HorizontalDivider()
+        Column(Modifier.padding(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically){
+                Text(
+                    text = "Battery",
+                    style = Typography.headlineSmall,
+                    fontWeight = FontWeight.Light
+                )
+                Text(if (batteryCharging) "Charging" else "Discarging",Modifier.padding(8.dp), style = Typography.labelSmall)
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            gi) {
+                Column(Modifier.padding(8.dp).fillMaxWidth()
+                    .weight(1f)) {
+                    Text("Voltage", style = Typography.labelSmall)
+                    Text(
+                        text = "${"%.2f".format(batteryVoltage)}V",
+                        style = Typography.headlineSmall
+                    )
+                }
+                Column(Modifier.padding(8.dp).fillMaxWidth()
+                    .weight(1f)) {
+                    Text("Current", style = Typography.labelSmall)
+                    Text(
+                        text = "${"%.2f".format(batteryCurrent)}A",
+                        style = Typography.headlineSmall
+                    )
+                }
+                Column(Modifier.padding(8.dp).fillMaxWidth()
+                    .weight(1f)) {
+                    Text("Power", style = Typography.labelSmall)
+                    Text(
+                        text = "${"%.0f".format(batteryCurrent * batteryVoltage)}W",
+                        style = Typography.displaySmall
+                    )
+                }
+            }
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(8.dp).fillMaxWidth()
+                    .weight(1f)) {
+                    Text("Remaining capacity", style = Typography.labelSmall)
+                    Text(
+                        text = "${"%.3f".format(batteryRemainingAh)}Ah",
+                        style = Typography.displaySmall
+                    )
+                    Text("Total capacity", style = Typography.labelSmall)
+                    Text(
+                        text = "${"%.3f".format(batteryCapacity)}Ah",
+                        style = Typography.bodyMedium
+                    )
+                }
+                Column(Modifier.padding(8.dp).fillMaxWidth()
+                    .weight(1f)) {
+                    Text("Remaining time", style = Typography.labelSmall)
+                    val hours = batteryTimeRemaining / 60
+                    val minutes = batteryTimeRemaining % 60
+                    Text(
+                        text = "${hours}h ${minutes}min",
+                        style = Typography.displaySmall
+                    )
+                }
+            }
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(8.dp).fillMaxWidth()
+                    .weight(1f)) {
+                    Text("Total charge energy", style = Typography.labelSmall)
+                    Text(
+                        text = "${"%.2f".format(batteryTotalChargeEnergy)}Wh",
+                        style = Typography.headlineSmall
+                    )
+                }
+                Column(Modifier.padding(8.dp).fillMaxWidth()
+                    .weight(1f)) {
+                    Text("Total discharge energy", style = Typography.labelSmall)
+                    Text(
+                        text = "${"%.2f".format(batteryTotalDischargeEnergy)}Wh",
+                        style = Typography.headlineSmall
+                    )
+                }
+            }
+        }
+        Button(onClick = { nav.navigate("devices") }) {
+            Text("Find other devices")
         }
     }
 }
