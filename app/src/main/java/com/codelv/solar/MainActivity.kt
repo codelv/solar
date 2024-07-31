@@ -302,11 +302,12 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
     var batteryTotalDischargeEnergy by remember{ mutableStateOf(0.0) }
     var batteryCapacity by remember{ mutableStateOf(0.0) }
     var batteryTimeRemaining by remember{ mutableStateOf(0) }
-    var inverterCurrent = abs(chargeCurrent - batteryCurrent);
+    var inverterCurrent = abs(chargeCurrent + (if (batteryCharging) -1 else 1) * batteryCurrent);
     var inverterPower = inverterCurrent * max(chargeVoltage, batteryVoltage);
     var inverterEnergy = max(0.0, chargeEnergy - batteryTotalChargeEnergy);
     var chargePower = chargeVoltage * chargeCurrent;
     var solarCurrent = if (solarVoltage > 0) chargePower / solarVoltage else 0.0;
+    var batteryPercentage = if (batteryCapacity > 0) batteryRemainingAh / batteryCapacity * 100 else 0.0;
 
     SystemBroadcastReceiver(systemActions = listOf(MonitorService.ACTION_BATTERY_MONITOR_DATA_AVAILABLE, MonitorService.ACTION_SOLAR_CHARGER_DATA_AVAILABLE)) { intent ->
         when (intent?.action) {
@@ -358,9 +359,11 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                     }
                     BatteryMonitorDataType.TotalChargeEnergy -> {
                         batteryTotalChargeEnergy = intent.getDoubleExtra(MonitorService.BATTERY_MONITOR_DATA_VALUE, 0.0)
+                        batteryCharging = true;
                     }
                     BatteryMonitorDataType.TotalDischargeEnergy -> {
                         batteryTotalDischargeEnergy = intent.getDoubleExtra(MonitorService.BATTERY_MONITOR_DATA_VALUE, 0.0)
+                        batteryCharging = false;
                     }
                     BatteryMonitorDataType.BatteryCapacity -> {
                         batteryCapacity = intent.getDoubleExtra(MonitorService.BATTERY_MONITOR_DATA_VALUE, 0.0)
@@ -412,7 +415,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                         .padding(8.dp)
                         .fillMaxWidth()
                         .weight(1f)) {
-                    Text("Energy", style = Typography.labelSmall)
+                    Text("Energy output", style = Typography.labelSmall)
                     Text(
                         text = "${"%.0f".format(chargeEnergy)}Wh",
                         style = Typography.displaySmall
@@ -485,7 +488,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                 }
                 Column(Modifier.padding(8.dp).fillMaxWidth()
                     .weight(1f)) {
-                    Text("Power", style = Typography.labelSmall)
+                    Text("Power draw", style = Typography.labelSmall)
                     Text(
                         text = "${"%.0f".format(inverterPower)}W",
                         style = Typography.headlineSmall
@@ -493,7 +496,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                 }
                 Column(Modifier.padding(8.dp).fillMaxWidth()
                     .weight(2f)) {
-                    Text("Energy", style = Typography.labelSmall)
+                    Text("Energy usage", style = Typography.labelSmall)
                     Text(
                         text = "${"%.0f".format(inverterEnergy)}Wh",
                         style = Typography.displaySmall
@@ -509,12 +512,12 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                     style = Typography.headlineSmall,
                     fontWeight = FontWeight.Light
                 )
-                Text(if (batteryCharging) "Charging" else "Discarging",Modifier.padding(8.dp), style = Typography.labelSmall)
+                Text(if (batteryCharging || chargeCurrent > batteryCurrent) "Charging" else "Discarging",Modifier.padding(8.dp), style = Typography.labelSmall)
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
-            gi) {
+            ) {
                 Column(Modifier.padding(8.dp).fillMaxWidth()
                     .weight(1f)) {
                     Text("Voltage", style = Typography.labelSmall)
@@ -550,7 +553,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                     )
                     Text("Total capacity", style = Typography.labelSmall)
                     Text(
-                        text = "${"%.3f".format(batteryCapacity)}Ah",
+                        text = "${"%.0f".format(batteryCapacity)}Ah",
                         style = Typography.bodyMedium
                     )
                 }
@@ -562,6 +565,11 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                     Text(
                         text = "${hours}h ${minutes}min",
                         style = Typography.displaySmall
+                    )
+                    Text("Battery percent", style = Typography.labelSmall)
+                    Text(
+                        text = "${"%.2f".format(batteryPercentage)}%",
+                        style = Typography.bodyMedium
                     )
                 }
             }
@@ -584,9 +592,15 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                 }
             }
         }
-        Button(onClick = { nav.navigate("devices") }) {
-            Text("Find other devices")
+        Row{
+            Button(onClick = { nav.navigate("devices") }) {
+                Text("Find other devices")
+            }
+            Button(onClick = { activity.monitorService?.sync() }) {
+                Text("Force reload")
+            }
         }
+
     }
 }
 

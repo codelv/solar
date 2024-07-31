@@ -23,14 +23,15 @@ import com.codelv.solar.MonitorService.Companion.ACTION_GATT_DATA_AVAILABLE
 import com.codelv.solar.MonitorService.Companion.ACTION_GATT_DISCONNECTED
 import com.codelv.solar.MonitorService.Companion.ACTION_GATT_SERVICES_DISCOVERED
 import com.codelv.solar.MonitorService.Companion.ACTION_SOLAR_CHARGER_DATA_AVAILABLE
+import com.codelv.solar.MonitorService.Companion.BATTERY_MONITOR_CONF_CHARACTERISTIC_UUID
 import com.codelv.solar.MonitorService.Companion.BATTERY_MONITOR_DATA_CHARACTERISTIC_UUID
 import com.codelv.solar.MonitorService.Companion.BATTERY_MONITOR_DATA_DESCRIPTOR_UUID
 import com.codelv.solar.MonitorService.Companion.BATTERY_MONITOR_DATA_SERVICE_UUID
 import com.codelv.solar.MonitorService.Companion.BATTERY_MONITOR_DATA_TYPE
 import com.codelv.solar.MonitorService.Companion.BATTERY_MONITOR_DATA_VALUE
-import com.codelv.solar.MonitorService.Companion.CHARGER_DATA_CHARACTERISTIC_UUID
-import com.codelv.solar.MonitorService.Companion.CHARGER_DATA_DESCRIPTOR_UUID
-import com.codelv.solar.MonitorService.Companion.CHARGER_DATA_SERVICE_UUID
+import com.codelv.solar.MonitorService.Companion.SOLAR_CHARGER_DATA_CHARACTERISTIC_UUID
+import com.codelv.solar.MonitorService.Companion.SOLAR_CHARGER_DATA_DESCRIPTOR_UUID
+import com.codelv.solar.MonitorService.Companion.SOLAR_CHARGER_DATA_SERVICE_UUID
 import com.codelv.solar.MonitorService.Companion.DEVICE_INFO_SERVICE_UUID
 import com.codelv.solar.MonitorService.Companion.DEVICE_MODEL_CHARACTERISTIC_UUID
 import com.codelv.solar.MonitorService.Companion.SOLAR_CHARGER_DATA_TYPE
@@ -129,6 +130,11 @@ class BatteryMonitorCommands{
         val high = (v shr 0x08 and 0xFF.toUShort()).toByte()
         return byteArrayOf(0x9a.toByte(), 0xb0.toByte(), high, low, 0xb0.toByte())
     }
+
+    companion object {
+        // bb9aa90cee
+        val HOME_DATA = byteArrayOf(0xBB.toByte(), 0x9A.toByte(), 0xA9.toByte(), 0x0C.toByte(), 0xEE.toByte())
+    }
 }
 
 class SolarChargerCommands {
@@ -145,6 +151,7 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
     var pendingActions: MutableList<BluetoothAction> = mutableListOf()
     var currentAction: BluetoothAction? = null
     var lastCharacteristicWrite: ByteArray? = null
+    var readBuffer: ByteArray = byteArrayOf()
 
     @RequiresPermission(BLUETOOTH_CONNECT)
     fun connect() {
@@ -152,6 +159,82 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
             return
         }
         bluetoothGatt = device.connectGatt(service, false, bluetoothGattCallback)
+    }
+
+    @RequiresPermission(BLUETOOTH_CONNECT)
+    fun sync(): Boolean {
+        if (connectionState.value != STATE_CONNECTED || bluetoothGatt == null) {
+            return false;
+        }
+        when (deviceType.value) {
+            DeviceType.BatteryMonitor -> {
+                val service = bluetoothGatt?.getService(UUID.fromString(BATTERY_MONITOR_DATA_SERVICE_UUID))
+                queueAction(
+                    BluetoothAction(
+                        BluetoothActionDir.Write,
+                        characteristic = service?.getCharacteristic(UUID.fromString(
+                            BATTERY_MONITOR_CONF_CHARACTERISTIC_UUID)),
+                        value = BatteryMonitorCommands.HOME_DATA
+                    )
+                )
+
+            }
+            DeviceType.SolarCharger -> {
+                val service = bluetoothGatt?.getService(UUID.fromString(SOLAR_CHARGER_DATA_SERVICE_UUID))
+                queueAction(
+                    BluetoothAction(
+                        BluetoothActionDir.Write,
+                        characteristic = service?.getCharacteristic(UUID.fromString(
+                            SOLAR_CHARGER_DATA_CHARACTERISTIC_UUID)),
+                        value = SolarChargerCommands.HOME_DATA
+                    )
+                )
+            }
+            else -> { return false }
+        }
+        return true
+    }
+
+    @RequiresPermission(BLUETOOTH_CONNECT)
+    fun queueAction(action: BluetoothAction) {
+        Log.d(TAG, "Queuing action")
+        pendingActions.add(action)
+        if (currentAction == null) {
+            processNextAction()
+        }
+    }
+
+    @RequiresPermission(BLUETOOTH_CONNECT)
+    fun processNextAction() {
+        // Only one can occur at a time
+        if (pendingActions.size > 0) {
+            var action = pendingActions.removeAt(0)
+            currentAction = action;
+            Log.d(TAG, "Processing action")
+            if (action.characteristic != null) {
+                val characterisitc = action.characteristic!!
+                if (action.dir == BluetoothActionDir.Read) {
+                    bluetoothGatt?.readCharacteristic(characterisitc)
+                } else {
+                    lastCharacteristicWrite = action.value!!;
+                    characterisitc.setValue(action.value!!)
+                    bluetoothGatt?.writeCharacteristic(characterisitc)
+                }
+            } else if (action.descriptor != null) {
+                val desc = action.descriptor!!
+                if (action.dir == BluetoothActionDir.Read) {
+                    bluetoothGatt?.readDescriptor(desc)
+                } else {
+                    desc.setValue(action.value!!)
+                    bluetoothGatt?.writeDescriptor(desc)
+                }
+            } else {
+                Log.w(TAG, "Action has no characteristic or descriptor")
+            }
+        } else {
+            currentAction = null;
+            Log.d(TAG, "No more actions")
+        }
     }
 
     @RequiresPermission(BLUETOOTH_CONNECT)
@@ -175,46 +258,6 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                 // disconnected from the GATT Server
                 service.broadcastUpdate(ACTION_GATT_DISCONNECTED)
                 connectionState.value = STATE_DISCONNECTED
-            }
-        }
-
-        @RequiresPermission(BLUETOOTH_CONNECT)
-        fun queueAction(action: BluetoothAction) {
-            Log.d(TAG, "Queuing action")
-            pendingActions.add(action)
-            if (currentAction == null) {
-                processNextAction()
-            }
-        }
-
-        @RequiresPermission(BLUETOOTH_CONNECT)
-        fun processNextAction() {
-            // Only one can occur at a time
-            if (pendingActions.size > 0) {
-                var action = pendingActions.removeAt(0)
-                currentAction = action;
-                Log.d(TAG, "Processing action")
-                if (action.characteristic != null) {
-                    val characterisitc = action.characteristic!!
-                    if (action.dir == BluetoothActionDir.Read) {
-                        bluetoothGatt?.readCharacteristic(characterisitc)
-                    } else {
-                        lastCharacteristicWrite = action.value!!;
-                        characterisitc.setValue(action.value!!)
-                        bluetoothGatt?.writeCharacteristic(characterisitc)
-                    }
-                } else if (action.descriptor != null) {
-                    val desc = action.descriptor!!
-                    if (action.dir == BluetoothActionDir.Read) {
-                        bluetoothGatt?.readDescriptor(desc)
-                    } else {
-                        desc.setValue(action.value!!)
-                        bluetoothGatt?.writeDescriptor(desc)
-                    }
-                }
-            } else {
-                currentAction = null;
-                Log.d(TAG, "No more actions")
             }
         }
 
@@ -271,7 +314,7 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                         )) {
                         Log.d(TAG, "Found battery monitor data ID")
                         deviceType.value = DeviceType.BatteryMonitor
-                        val c = service.getCharacteristic(
+                        var c = service.getCharacteristic(
                             UUID.fromString(BATTERY_MONITOR_DATA_CHARACTERISTIC_UUID)
                         )
                         if (c != null) {
@@ -281,7 +324,7 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                             if (d != null) {
                                 Log.d(TAG, "Found battery monitor data config")
                                 queueAction(
-                                    BluetoothAction(
+                                        BluetoothAction(
                                         BluetoothActionDir.Write,
                                         descriptor = d,
                                         value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
@@ -290,18 +333,19 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                             }
                             gatt.setCharacteristicNotification(c, true)
                         }
+                        sync()
                     } else if (deviceType.value == DeviceType.Unknown && service.uuid == UUID.fromString(
-                            CHARGER_DATA_SERVICE_UUID
+                            SOLAR_CHARGER_DATA_SERVICE_UUID
                         )) {
                         Log.d(TAG, "Found charger data ID")
                         deviceType.value = DeviceType.SolarCharger
                         val c = service.getCharacteristic(
-                            UUID.fromString(CHARGER_DATA_CHARACTERISTIC_UUID)
+                            UUID.fromString(SOLAR_CHARGER_DATA_CHARACTERISTIC_UUID)
                         )
                         if (c != null) {
                             Log.d(TAG, "Found charger data")
                             val d =
-                                c.getDescriptor(UUID.fromString(CHARGER_DATA_DESCRIPTOR_UUID))
+                                c.getDescriptor(UUID.fromString(SOLAR_CHARGER_DATA_DESCRIPTOR_UUID))
                             if (d != null) {
                                 Log.d(TAG, "Found charger data config")
                                 queueAction(
@@ -313,13 +357,7 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                                 )
                             }
                             gatt.setCharacteristicNotification(c, true)
-                            queueAction(
-                                BluetoothAction(
-                                    BluetoothActionDir.Write,
-                                    characteristic = c,
-                                    value = SolarChargerCommands.HOME_DATA
-                                )
-                            )
+                            sync()
                         }
                     }
                 }
@@ -368,7 +406,7 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                 UUID.fromString(BATTERY_MONITOR_DATA_CHARACTERISTIC_UUID) -> {
                     onBatteryMonitorData(characteristic.value)
                 }
-                UUID.fromString(CHARGER_DATA_CHARACTERISTIC_UUID) -> {
+                UUID.fromString(SOLAR_CHARGER_DATA_CHARACTERISTIC_UUID) -> {
                     onSolarChargerData(characteristic.value)
 
                     // Solar charger needs data polled
@@ -403,7 +441,6 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
 
             intent = Intent(ACTION_SOLAR_CHARGER_DATA_AVAILABLE)
             intent.putExtra(SOLAR_CHARGER_DATA_TYPE, SolarChargerDataType.ChargeCurrent.code)
-            Log.d(TAG, "Charge current ${data.sliceArray(7..8).toHexString()}")
             intent.putExtra(SOLAR_CHARGER_DATA_VALUE, data.sliceArray(7..8).toHexString().toInt(16).toDouble() / 100)
             service.sendBroadcast(intent)
 
@@ -434,59 +471,124 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
 
             intent = Intent(ACTION_SOLAR_CHARGER_DATA_AVAILABLE)
             intent.putExtra(SOLAR_CHARGER_DATA_TYPE, SolarChargerDataType.ChargerTemp.code)
-            intent.putExtra(SOLAR_CHARGER_DATA_VALUE, data[2].toHexString().toInt(16))
+            intent.putExtra(SOLAR_CHARGER_DATA_VALUE, data[11].toHexString().toInt(16))
             service.sendBroadcast(intent)
+
+            intent = Intent(ACTION_SOLAR_CHARGER_DATA_AVAILABLE)
+            intent.putExtra(SOLAR_CHARGER_DATA_TYPE, SolarChargerDataType.BatteryTemp.code)
+            intent.putExtra(SOLAR_CHARGER_DATA_VALUE, data[12].toHexString().toInt(16))
+            service.sendBroadcast(intent)
+
         }
 
     }
 
+    fun discard(size: Int) {
+        if (readBuffer.size >= size + 1) {
+            readBuffer = byteArrayOf()
+        } else {
+            readBuffer = readBuffer.sliceArray(size + 1.. readBuffer.size)
+        }
+    }
+
     fun onBatteryMonitorData(data: ByteArray) {
         Log.d(TAG, "onBatteryMonitorData ${data.size} bytes ${data.toHexString()}")
+        if (data.size == 0) {
+            return
+        }
+        readBuffer += data
+
         // The Junctek battery monitor uses some weird format where the data
         // is like bb2043c1052954d825ee.
         // Each field/data is separated by hex encoded codes (eg c1, d8)
         // Must convert to hex string (little endian) or toDouble uses incorrect base (16)
-        if (data.first() == 0xbb.toByte()
-            && data.last() == 0xee.toByte()
-        ) {
+        // Might also come in chunks after a query is sent like
+        // bb1516d61186d710eebb0600c1015930d840eebb
+        // 925430d5331782d203477174d4124134f385eebb
+        // 0615c1016328d863eebb925431d5331784d20347
+        // 7178d4124135f393eebb00f62655c00615c101d1
+        // 925431d51516d61186d7016328d800d999d03317
+        // 84d203299635d303477178d400c200c301c401f7
+        // 00c500c700c600c800c95000b00255b10100b201
+        // 00b30100b40100f500b501b600b700e400e500e6
+        // 00e720e820e91152f000f100f800f9240801f212
+        // 4135f300b801b94140e00964e10137e20255e345
+        // eebb01d199d058eebb0629c1016699d899ee
+        while (readBuffer.size > 0) {
+            val start = readBuffer.indexOf(0xbb.toByte())
+            val end = readBuffer.indexOf(0xee.toByte())
+
+            // Got end of packet but missing start
+            if (end >= 0 && end <= start) {
+                discard(end) // Discard what was used
+                break;
+            }
+            else if (end < 0 || start < 0) {
+                break; // Need to read more
+            }
+            assert(start >= 0 && end > start)
+            val packet = readBuffer.sliceArray(start..end)
+            discard(end)// Discard what was used
+            Log.d(TAG, "Read buffer size remaining ${readBuffer.size}")
             var entry = ByteArray(0)
-            for (c in data.slice(1..data.size - 1)) {
+            Log.d(TAG, "onBatteryMonitorData found packet ${packet.size} bytes ${packet.toHexString()}")
+            for (c in packet.slice(1..packet.size - 1)) {
                 // They treat anything with a hex character as a code
                 if ((c.toUByte() and 0xF0.toUByte() > 0xA0.toUByte()) || (c.toUByte() and 0x0F.toUByte() > 0xA.toUByte())) {
                     val type = BatteryMonitorDataType.fromByte(c)
-                    Log.d(TAG, "Found packet type ${c.toHexString()} ${type?.name} with data ${entry.toHexString()}")
+                    Log.i(
+                        TAG,
+                        "Found packet type ${c.toHexString()} ${type?.name} with data ${entry.toHexString()}"
+                    )
                     val intent = Intent(ACTION_BATTERY_MONITOR_DATA_AVAILABLE)
 
                     when (type) {
                         BatteryMonitorDataType.Voltage,
                         BatteryMonitorDataType.Current -> {
                             if (entry.size > 0) {
-                                intent.putExtra(BATTERY_MONITOR_DATA_VALUE, entry.toHexString().toDouble() / 100)
-                            }
-                        }
-                        BatteryMonitorDataType.RemainingAh, BatteryMonitorDataType.TotalChargeEnergy, BatteryMonitorDataType.TotalDischargeEnergy -> {
-                            if (entry.size > 0) {
-                                intent.putExtra(BATTERY_MONITOR_DATA_VALUE, entry.toHexString().toDouble() / 1000)
-                            }
-                        }
-                        BatteryMonitorDataType.IsCharging, BatteryMonitorDataType.IsRecording ->     {
-                            if (entry.size > 0) {
-                                intent.putExtra(BATTERY_MONITOR_DATA_VALUE, entry[0].toHexString().toInt() == 1)
-                            }
-                        }
-                        BatteryMonitorDataType.RemainingTimeInMinutes ->     {
-                            if (entry.size > 0) {
-                                intent.putExtra(BATTERY_MONITOR_DATA_VALUE, entry.toHexString().toInt())
-                            }
-                        }
-                        BatteryMonitorDataType.BatteryCapacity ->     {
-                            if (entry.size > 0) {
                                 intent.putExtra(
                                     BATTERY_MONITOR_DATA_VALUE,
-                                    entry.toHexString().toDouble()
+                                    entry.toHexString().toDouble() / 100
                                 )
                             }
                         }
+
+                        BatteryMonitorDataType.RemainingAh, BatteryMonitorDataType.TotalChargeEnergy, BatteryMonitorDataType.TotalDischargeEnergy -> {
+                            if (entry.size > 0) {
+                                intent.putExtra(
+                                    BATTERY_MONITOR_DATA_VALUE,
+                                    entry.toHexString().toDouble() / 1000
+                                )
+                            }
+                        }
+
+                        BatteryMonitorDataType.IsCharging, BatteryMonitorDataType.IsRecording -> {
+                            if (entry.size > 0) {
+                                intent.putExtra(
+                                    BATTERY_MONITOR_DATA_VALUE,
+                                    entry[0].toHexString().toInt() == 1
+                                )
+                            }
+                        }
+
+                        BatteryMonitorDataType.RemainingTimeInMinutes -> {
+                            if (entry.size > 0) {
+                                intent.putExtra(
+                                    BATTERY_MONITOR_DATA_VALUE,
+                                    entry.toHexString().toInt()
+                                )
+                            }
+                        }
+
+                        BatteryMonitorDataType.BatteryCapacity -> {
+                            if (entry.size > 0) {
+                                intent.putExtra(
+                                    BATTERY_MONITOR_DATA_VALUE,
+                                    entry.toHexString().toDouble() / 10
+                                )
+                            }
+                        }
+
                         else -> {
                             if (entry.size > 0) {
                                 intent.putExtra(BATTERY_MONITOR_DATA_VALUE, entry)
@@ -504,6 +606,11 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                 }
             }
         }
+        if (readBuffer.size > 512) {
+            // If not getting the expected data for some reason, reset
+            Log.w(TAG, "Read buffer too large, discarding.")
+            readBuffer = byteArrayOf()
+        }
     }
 }
 
@@ -515,10 +622,11 @@ class MonitorService : Service() {
         val DEVICE_MODEL_CHARACTERISTIC_UUID = "00002A24-0000-1000-8000-00805F9B34FB"
         val BATTERY_MONITOR_DATA_SERVICE_UUID = "0000FFF0-0000-1000-8000-00805F9B34FB"
         val BATTERY_MONITOR_DATA_CHARACTERISTIC_UUID = "0000FFF1-0000-1000-8000-00805F9B34FB"
+        val BATTERY_MONITOR_CONF_CHARACTERISTIC_UUID = "0000FFF2-0000-1000-8000-00805F9B34FB"
         val BATTERY_MONITOR_DATA_DESCRIPTOR_UUID = "00002902-0000-1000-8000-00805F9B34FB"
-        val CHARGER_DATA_SERVICE_UUID = "0000FFE0-0000-1000-8000-00805F9B34FB"
-        val CHARGER_DATA_DESCRIPTOR_UUID = "00002902-0000-1000-8000-00805F9B34FB"
-        val CHARGER_DATA_CHARACTERISTIC_UUID = "0000FFE1-0000-1000-8000-00805F9B34FB"
+        val SOLAR_CHARGER_DATA_SERVICE_UUID = "0000FFE0-0000-1000-8000-00805F9B34FB"
+        val SOLAR_CHARGER_DATA_DESCRIPTOR_UUID = "00002902-0000-1000-8000-00805F9B34FB"
+        val SOLAR_CHARGER_DATA_CHARACTERISTIC_UUID = "0000FFE1-0000-1000-8000-00805F9B34FB"
         val ACTION_GATT_CONNECTED = "com.codelv.solar.ACTION_GATT_CONNECTED"
         val ACTION_GATT_DISCONNECTED = "com.codelv.solar.ACTION_GATT_DISCONNECTED"
         val ACTION_GATT_SERVICES_DISCOVERED = "com.codelv.solar.ACTION_GATT_SERVICES_DISCOVERED"
@@ -564,5 +672,9 @@ class MonitorService : Service() {
         sendBroadcast(intent)
     }
 
+    @RequiresPermission(BLUETOOTH_CONNECT)
+    fun sync() {
+        this.connections.forEach{it.sync()}
+    }
 
 }
