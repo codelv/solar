@@ -58,8 +58,11 @@ dependencies {
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
+    implementation(libs.androidx.material)
+    implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.navigation.compose)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -73,7 +76,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
 
     implementation(libs.vico.compose)
-    implementation(libs.vico.compose.m2)
     implementation(libs.vico.compose.m3)
     implementation(libs.vico.core)
     implementation(libs.vico.views)

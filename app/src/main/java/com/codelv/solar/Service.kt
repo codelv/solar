@@ -62,7 +62,10 @@ data class BluetoothAction(
     val dir: BluetoothActionDir,
     var characteristic: BluetoothGattCharacteristic? = null,
     var descriptor: BluetoothGattDescriptor? = null,
-    var value: ByteArray? = null
+    // Data to write
+    var value: ByteArray? = null,
+    // Optional callback to invoke when the action is completed
+    var callback: ((action: BluetoothAction) -> Unit)? = null,
 )
 
 enum class SolarChargerDataType(val code: Int) {
@@ -100,8 +103,7 @@ enum class BatteryMonitorDataType(val code: Int) {
     Status(0xd0),
     IsCharging(0xd1),
     RemainingAh(0xd2),
-    TotalDischargeEnergy(0xd3)
-    ,
+    TotalDischargeEnergy(0xd3),
     TotalChargeEnergy(0xd4),
     RecordProgress(0xd5),
     RemainingTimeInMinutes(0xd6),
@@ -158,11 +160,11 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
         if (bluetoothGatt != null) {
             return
         }
-        bluetoothGatt = device.connectGatt(service, false, bluetoothGattCallback)
+        bluetoothGatt = device.connectGatt(service, true, bluetoothGattCallback)
     }
 
     @RequiresPermission(BLUETOOTH_CONNECT)
-    fun sync(): Boolean {
+    fun sync(callback: ((action: BluetoothAction) -> Unit)? = null): Boolean {
         if (connectionState.value != STATE_CONNECTED || bluetoothGatt == null) {
             return false;
         }
@@ -174,7 +176,8 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                         BluetoothActionDir.Write,
                         characteristic = service?.getCharacteristic(UUID.fromString(
                             BATTERY_MONITOR_CONF_CHARACTERISTIC_UUID)),
-                        value = BatteryMonitorCommands.HOME_DATA
+                        value = BatteryMonitorCommands.HOME_DATA,
+                        callback = callback
                     )
                 )
 
@@ -186,7 +189,8 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                         BluetoothActionDir.Write,
                         characteristic = service?.getCharacteristic(UUID.fromString(
                             SOLAR_CHARGER_DATA_CHARACTERISTIC_UUID)),
-                        value = SolarChargerCommands.HOME_DATA
+                        value = SolarChargerCommands.HOME_DATA,
+                        callback = callback
                     )
                 )
             }
@@ -197,7 +201,7 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
 
     @RequiresPermission(BLUETOOTH_CONNECT)
     fun queueAction(action: BluetoothAction) {
-        Log.d(TAG, "Queuing action")
+        // Log.d(TAG, "Queuing action")
         pendingActions.add(action)
         if (currentAction == null) {
             processNextAction()
@@ -207,10 +211,18 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
     @RequiresPermission(BLUETOOTH_CONNECT)
     fun processNextAction() {
         // Only one can occur at a time
+        if (currentAction != null && currentAction?.callback != null) {
+            try {
+                Log.d(TAG, "Invoking action callback")
+                currentAction?.callback?.invoke(currentAction!!)
+            } catch (e: Exception) {
+                Log.e(TAG, "Callback exception: ${e}")
+            }
+        }
         if (pendingActions.size > 0) {
             var action = pendingActions.removeAt(0)
             currentAction = action;
-            Log.d(TAG, "Processing action")
+            // Log.d(TAG, "Processing action")
             if (action.characteristic != null) {
                 val characterisitc = action.characteristic!!
                 if (action.dir == BluetoothActionDir.Read) {
@@ -233,7 +245,7 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
             }
         } else {
             currentAction = null;
-            Log.d(TAG, "No more actions")
+            // Log.d(TAG, "No more actions")
         }
     }
 
@@ -332,8 +344,8 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                                 )
                             }
                             gatt.setCharacteristicNotification(c, true)
+                            sync()
                         }
-                        sync()
                     } else if (deviceType.value == DeviceType.Unknown && service.uuid == UUID.fromString(
                             SOLAR_CHARGER_DATA_SERVICE_UUID
                         )) {
@@ -529,17 +541,17 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
             assert(start >= 0 && end > start)
             val packet = readBuffer.sliceArray(start..end)
             discard(end)// Discard what was used
-            Log.d(TAG, "Read buffer size remaining ${readBuffer.size}")
+            // Log.d(TAG, "Read buffer size remaining ${readBuffer.size}")
             var entry = ByteArray(0)
-            Log.d(TAG, "onBatteryMonitorData found packet ${packet.size} bytes ${packet.toHexString()}")
+            // Log.d(TAG, "onBatteryMonitorData found packet ${packet.size} bytes ${packet.toHexString()}")
             for (c in packet.slice(1..packet.size - 1)) {
                 // They treat anything with a hex character as a code
                 if ((c.toUByte() and 0xF0.toUByte() > 0xA0.toUByte()) || (c.toUByte() and 0x0F.toUByte() > 0xA.toUByte())) {
                     val type = BatteryMonitorDataType.fromByte(c)
-                    Log.i(
-                        TAG,
-                        "Found packet type ${c.toHexString()} ${type?.name} with data ${entry.toHexString()}"
-                    )
+//                    Log.i(
+//                        TAG,
+//                        "Found packet type ${c.toHexString()} ${type?.name} with data ${entry.toHexString()}"
+//                    )
                     val intent = Intent(ACTION_BATTERY_MONITOR_DATA_AVAILABLE)
 
                     when (type) {
@@ -673,8 +685,8 @@ class MonitorService : Service() {
     }
 
     @RequiresPermission(BLUETOOTH_CONNECT)
-    fun sync() {
-        this.connections.forEach{it.sync()}
+    fun sync(callback: ((action: BluetoothAction) -> Unit)? = null) {
+        this.connections.forEach{it.sync(callback)}
     }
 
 }
