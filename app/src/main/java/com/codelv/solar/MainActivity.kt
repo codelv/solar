@@ -79,6 +79,7 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.getSystemService
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -87,7 +88,9 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.codelv.solar.MonitorService.Companion.ACTION_BATTERY_MONITOR_CONNECTED
 import com.codelv.solar.MonitorService.Companion.ACTION_BATTERY_MONITOR_DATA_AVAILABLE
+import com.codelv.solar.MonitorService.Companion.ACTION_SOLAR_CHARGER_CONNECTED
 import com.codelv.solar.MonitorService.Companion.ACTION_SOLAR_CHARGER_DATA_AVAILABLE
 import com.codelv.solar.ui.theme.SolarTheme
 import com.codelv.solar.ui.theme.Typography
@@ -111,15 +114,17 @@ import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
 import com.patrykandpatrick.vico.core.cartesian.layer.LineCartesianLayer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.IOException
 import kotlin.math.max
 
 const val SNAPSHOT_PERIOD: Long = 1000
 
 class MainActivity : ComponentActivity() {
-    val Context.prefs by preferencesDataStore(name = "user_preferences")
+    val dataStore by preferencesDataStore(name = "user_preferences")
     val state = AppViewModel()
     val handler = Handler(Looper.getMainLooper())
     var monitorService: MonitorService? = null;
@@ -267,8 +272,31 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-
+                MonitorService.ACTION_BATTERY_MONITOR_CONNECTED -> {
+                    val device: BluetoothDevice = intent?.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)!!
+                    state.prefs.batteryMonitorAddress = device.address
+                    state.unsaved.value = true
+                }
+                MonitorService.ACTION_SOLAR_CHARGER_CONNECTED -> {
+                    val device: BluetoothDevice = intent?.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)!!
+                    state.prefs.solarChargerAddress = device.address
+                    state.unsaved.value = true
+                }
                 else -> {}
+            }
+        }
+    }
+
+    fun autoconnect() {
+        listOf(state.prefs.solarChargerAddress, state.prefs.batteryMonitorAddress).forEach { address ->
+            if (address != null) {
+                try {
+                    val dev: BluetoothDevice = bluetoothAdapter.getRemoteDevice(address)
+                    state.connectedDevices.add(dev)
+                    monitorService?.connect(dev)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Autoconnect error: ${e}")
+                }
             }
         }
     }
@@ -279,9 +307,12 @@ class MainActivity : ComponentActivity() {
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
 
         val intentFilter = IntentFilter()
+        intentFilter.addAction(ACTION_SOLAR_CHARGER_CONNECTED)
         intentFilter.addAction(ACTION_SOLAR_CHARGER_DATA_AVAILABLE)
+        intentFilter.addAction(ACTION_BATTERY_MONITOR_CONNECTED)
         intentFilter.addAction(ACTION_BATTERY_MONITOR_DATA_AVAILABLE)
         registerReceiver(dataReceiver, intentFilter, RECEIVER_EXPORTED)
+
 
         super.onCreate(savedInstanceState)
         setContent {
@@ -313,26 +344,28 @@ inline fun <reified Activity : ComponentActivity> Context.getActivity(): Activit
 }
 
 
+
+
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun MainView(state: AppViewModel) {
+    val context = LocalContext.current
+    val activity = context.getActivity<MainActivity>()!!
     LaunchedEffect(Unit){
-        while (true) {
-            delay(SNAPSHOT_PERIOD)
-            state.snapshot()
+        withContext(Dispatchers.Default) {
+            state.load(activity.dataStore)
+            while (true) {
+                delay(SNAPSHOT_PERIOD)
+                state.snapshot()
+                if (state.unsaved.value) {
+                    state.save(activity.dataStore)
+                }
+            }
         }
     }
 
     val nav = rememberNavController()
     NavHost(navController = nav, startDestination = "devices") {
-        composable("devices") {
-            Log.i(TAG, "Navigate to devices creen")
-            Scaffold(
-                modifier = Modifier.fillMaxSize(),
-                bottomBar = { BottonNavBar(nav) }) { innerPadding ->
-                BluetoothDevicesScreen(nav, state)
-            }
-        }
         composable("dashboard") {
             Log.i(TAG, "Navigate to dashboard")
             Scaffold(
@@ -347,6 +380,14 @@ fun MainView(state: AppViewModel) {
                 modifier = Modifier.fillMaxSize(),
                 bottomBar = { BottonNavBar(nav) }) { innerPadding ->
                 ChartsScreen(nav, state)
+            }
+        }
+        composable("devices") {
+            Log.i(TAG, "Navigate to devices creen")
+            Scaffold(
+                modifier = Modifier.fillMaxSize(),
+                bottomBar = { BottonNavBar(nav) }) { innerPadding ->
+                BluetoothDevicesScreen(nav, state)
             }
         }
     }
@@ -524,6 +565,12 @@ fun BluetoothDevicesScreen(nav: NavHostController, state: AppViewModel) {
                 if (!state.availableDevices.contains(device)) {
                     state.availableDevices.add(device)
                 }
+                val lastBatteryMonitor = if (state.prefs.batteryMonitorAddress != null) activity.bluetoothAdapter.getRemoteDevice(state.prefs.batteryMonitorAddress) else null
+                val lastSolarCharger = if (state.prefs.solarChargerAddress != null ) activity.bluetoothAdapter.getRemoteDevice(state.prefs.solarChargerAddress) else null
+                if (!state.connectedDevices.contains(device) && (device == lastBatteryMonitor || device == lastSolarCharger)) {
+                    state.connectedDevices.add(device)
+                    activity.monitorService?.connect(device)
+                }
 
             })
         LaunchedEffect(true) {
@@ -555,11 +602,15 @@ fun BluetoothDevicesScreen(nav: NavHostController, state: AppViewModel) {
             var name: String? = device.name
             Row(
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier
                     .padding(16.dp)
                     .fillMaxWidth()
                     .clickable(onClick = {
-                        if (!state.connectedDevices.contains(device)) {
+                        if (state.connectedDevices.contains(device)) {
+                            state.connectedDevices.remove(device)
+                            activity.monitorService?.disconnect(device)
+                        } else {
                             Log.d(TAG, "New bluetooth connection")
                             state.connectedDevices.add(device)
                             activity.monitorService?.connect(device)
@@ -568,8 +619,9 @@ fun BluetoothDevicesScreen(nav: NavHostController, state: AppViewModel) {
                     })
                     .fillMaxWidth()
             ) {
-                Text(if (name != null) name else "Unamed device")
+                Text(if (name != null) name else "Unnamed device")
                 if (state.connectedDevices.contains(device)) {
+                    Icon(imageVector = Icons.Filled.BluetoothConnected, contentDescription =null, tint = Color.Green )
                     Text("Connected", style = Typography.labelSmall)
                 }
             }
@@ -616,10 +668,10 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
             refreshing = false
         }, 5000)
         var n = activity.monitorService!!.connections.size;
-        activity.monitorService?.sync({ action ->
+        activity.monitorService?.sync{ action ->
             n -= 1;
             refreshing = n > 0
-        })
+        }
     }
 
     val refreshState = rememberPullRefreshState(refreshing, ::refresh)

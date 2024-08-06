@@ -1,13 +1,23 @@
 package com.codelv.solar
 
 import android.bluetooth.BluetoothDevice
+import android.util.Log
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.lifecycle.ViewModel
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.io.IOException
 import java.util.Date
 import kotlin.math.abs
 import kotlin.math.max
@@ -24,9 +34,44 @@ data class Snapshot(
 )
 
 data class UserPreferences(
-    val batteryMonitorAddres: String? = null,
-    val solarChargerAddress: String? = null,
-)
+    var batteryMonitorAddress: String? = null,
+    var solarChargerAddress: String? = null,
+) {
+    companion object {
+        suspend fun load(dataStore: DataStore<Preferences>): UserPreferences {
+            return dataStore.data
+                .catch { exception ->
+                    // dataStore.data throws an IOException when an error is encountered when reading data
+                    if (exception is IOException) {
+                        Log.d("UserPreferences", "Preferences empty")
+                        emit(emptyPreferences())
+                    } else {
+                        throw exception
+                    }
+                }.map {  state ->
+                    UserPreferences(
+                        batteryMonitorAddress = state[stringPreferencesKey(UserPreferences::batteryMonitorAddress.name)],
+                        solarChargerAddress = state[stringPreferencesKey(UserPreferences::solarChargerAddress.name)]
+                    )
+                }.first()
+        }
+    }
+
+    suspend fun save(dataStore: DataStore<Preferences>) {
+        dataStore.edit { state ->
+            if (batteryMonitorAddress == null) {
+                state.remove(stringPreferencesKey(::batteryMonitorAddress.name))
+            } else {
+                state[stringPreferencesKey(::batteryMonitorAddress.name)] = batteryMonitorAddress!!
+            }
+            if (solarChargerAddress == null) {
+                state.remove(stringPreferencesKey(::solarChargerAddress.name))
+            } else {
+                state[stringPreferencesKey(::solarChargerAddress.name)] = solarChargerAddress!!
+            }
+        }
+    }
+}
 
 
 
@@ -86,13 +131,13 @@ class AppViewModel : ViewModel() {
     var lastUpdate = mutableStateOf(Date())
     var history = mutableStateListOf<Snapshot>()
     val mutex = Mutex()
+    var unsaved = mutableStateOf(false)
 
     val solarPowerModelProducer = CartesianChartModelProducer()
     val batteryPowerModelProducer = CartesianChartModelProducer()
     val inverterPowerModelProducer = CartesianChartModelProducer()
     val currentsModelProducer = CartesianChartModelProducer()
     val voltagesModelProducer = CartesianChartModelProducer()
-
 
     suspend fun snapshot() {
         val t = Date()
@@ -116,5 +161,14 @@ class AppViewModel : ViewModel() {
 //            history.removeAt(0)
 //        }
     }
+    suspend fun load(dataStore: DataStore<Preferences>) {
+        Log.d("State", "loading preferences")
+        prefs = UserPreferences.load(dataStore)
+    }
 
+    suspend fun save(dataStore: DataStore<Preferences>) {
+        Log.d("State", "saving preferences")
+        prefs.save(dataStore)
+        unsaved.value = false
+    }
 }
