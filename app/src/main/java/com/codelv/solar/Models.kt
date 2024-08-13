@@ -1,9 +1,12 @@
 package com.codelv.solar
 
 import android.bluetooth.BluetoothDevice
+import android.os.Parcelable
 import android.util.Log
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
@@ -12,6 +15,7 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.lifecycle.ViewModel
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
+import kotlinx.android.parcel.Parcelize
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -19,11 +23,13 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.IOException
 import java.util.Date
+import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.math.abs
 import kotlin.math.max
 
+@Parcelize
 data class Snapshot(
-    val time: Date,
+    val date: Date,
     val solarVoltage: Double,
     val chargerVoltage: Double,
     val chargerCurrent: Double,
@@ -31,7 +37,7 @@ data class Snapshot(
     val batteryVoltage: Double,
     val batteryCurrent: Double,
     val batteryRemainingAh: Double,
-)
+) : Parcelable
 
 data class UserPreferences(
     var batteryMonitorAddress: String? = null,
@@ -73,7 +79,13 @@ data class UserPreferences(
     }
 }
 
+data class ModelChangeAction(
+    val clearRecordedData: Boolean = false,
+    val recordedData: Array<VoltageCurrent>? = null,
+    val historyRecords: Array<BatteryMonitorHistoryRecord>? = null,
+    val chargerHistory: ChargerHistory? = null,
 
+)
 
 class AppViewModel : ViewModel() {
     var prefs = UserPreferences()
@@ -99,6 +111,9 @@ class AppViewModel : ViewModel() {
     var connectedDevices = mutableStateListOf<BluetoothDevice>()
     var chartAutoscroll = mutableStateOf(true)
     var chartXStep = mutableStateOf(10.0)
+    var historyAutoscroll = mutableStateOf(true)
+    var historyXStep = mutableStateOf(10.0)
+
 
     var inverterCurrent = derivedStateOf {
         // If charger is not connected don't show this
@@ -128,24 +143,63 @@ class AppViewModel : ViewModel() {
         if (batteryCapacity.value > 0) batteryRemainingAh.value / batteryCapacity.value * 100 else 0.0
     }
 
+    // RecordedData cannot be updated without a lock
+    // not sure how to do that from the broadcast receiver
+    var pendingChanges = ConcurrentLinkedQueue<ModelChangeAction>()
+        var lastBatteryRecordStartTime: MutableState<Date?> = mutableStateOf(null)
+    var batteryRecordedData = mutableStateListOf<VoltageCurrent>()
+    var batteryRecordMinutes = mutableStateOf(0)
+    var batteryHistoryRecords = mutableStateListOf<BatteryMonitorHistoryRecord>()
+
+    var chargerHistoryData = mutableStateMapOf<Int, ChargerHistory>()
+
     var lastUpdate = mutableStateOf(Date())
-    var history = mutableStateListOf<Snapshot>()
+    var snapshots = mutableStateListOf<Snapshot>()
     val mutex = Mutex()
     var unsaved = mutableStateOf(false)
 
     val solarPowerModelProducer = CartesianChartModelProducer()
+    val chargerHistoryModelProducer = CartesianChartModelProducer()
+
+    val batteryRecordedDataModelProducer = CartesianChartModelProducer()
     val batteryPowerModelProducer = CartesianChartModelProducer()
     val inverterPowerModelProducer = CartesianChartModelProducer()
     val currentsModelProducer = CartesianChartModelProducer()
     val voltagesModelProducer = CartesianChartModelProducer()
 
+    suspend fun syncPendingChanges() {
+        mutex.withLock {
+            while (pendingChanges.isNotEmpty()) {
+                val action = pendingChanges.poll()
+                if (action != null) {
+                    if (action.clearRecordedData) {
+                        batteryRecordedData.clear()
+                    } else if (action.recordedData != null) {
+                        batteryRecordedData.addAll(action.recordedData!!)
+                        Log.w(TAG, "Updated recorded data ${batteryRecordedData.size}!")
+                    } else if (action.historyRecords != null) {
+                        batteryHistoryRecords.clear()
+                        batteryHistoryRecords.addAll(action.historyRecords!!)
+                        Log.w(TAG, "Updated history records  ${batteryHistoryRecords.size}!")
+                    } else if (action.chargerHistory  != null) {
+                        val entry = action.chargerHistory!!
+                        chargerHistoryData.put(entry.index, entry)
+                        Log.w(TAG, "Updated charger history  ${chargerHistoryData.size}!")
+                    } else {
+                        Log.w(TAG, "Model sync action with no effect!")
+                    }
+                }
+            }
+        }
+    }
+
     suspend fun snapshot() {
         val t = Date()
         val sign = if (batteryCharging.value) 1 else -1
         mutex.withLock {
-            history.add(
+            snapshots.add(
                 Snapshot(
-                    time = t,
+                    date = t,
                     chargerCurrent = chargerCurrent.value,
                     chargerVoltage = chargerVoltage.value,
                     chargerEnergy = chargerTodayEnergy.value,

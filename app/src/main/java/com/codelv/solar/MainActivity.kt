@@ -41,14 +41,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.DropdownMenu
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.BluetoothConnected
 import androidx.compose.material.icons.filled.BluetoothDisabled
+import androidx.compose.material.icons.filled.BluetoothSearching
 import androidx.compose.material.icons.outlined.Bluetooth
 import androidx.compose.material.icons.outlined.Dashboard
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.LineAxis
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
@@ -79,7 +82,6 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.getSystemService
-import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -114,11 +116,11 @@ import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
 import com.patrykandpatrick.vico.core.cartesian.layer.LineCartesianLayer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.io.IOException
+import java.time.LocalTime
+import java.util.Date
 import kotlin.math.max
 
 const val SNAPSHOT_PERIOD: Long = 1000
@@ -161,7 +163,18 @@ class MainActivity : ComponentActivity() {
                             state.solarVoltage.value =
                                 intent.getDoubleExtra(MonitorService.SOLAR_CHARGER_DATA_VALUE, 0.0)
                         }
-
+                        SolarChargerDataType.HistoryData -> {
+                            var data: ChargerHistory = intent.getParcelableExtra(MonitorService.SOLAR_CHARGER_DATA_VALUE)!!
+                            if (data.index == 0) {
+                                state.chargerMinVoltage.value = data.minVoltage
+                                state.chargerMaxVoltage.value = data.maxVoltage
+                                state.chargerTodayEnergy.value = data.totalEnergy
+                                state.solarPeakPower.value = data.peakPower
+                            }
+                            state.pendingChanges.add(ModelChangeAction(
+                                chargerHistory=data,
+                            ))
+                        }
                         SolarChargerDataType.TodayMinBatteryVoltage -> {
                             state.chargerMinVoltage.value =
                                 intent.getDoubleExtra(MonitorService.SOLAR_CHARGER_DATA_VALUE, 0.0)
@@ -201,7 +214,6 @@ class MainActivity : ComponentActivity() {
                             state.chargerTemp.value =
                                 intent.getIntExtra(MonitorService.SOLAR_CHARGER_DATA_VALUE, 0)
                         }
-
                         else -> {}
                     }
                 }
@@ -268,6 +280,52 @@ class MainActivity : ComponentActivity() {
                                 intent.getIntExtra(MonitorService.BATTERY_MONITOR_DATA_VALUE, 0)
                         }
 
+                        BatteryMonitorDataType.RecordProgressInMinutes -> {
+                            state.batteryRecordMinutes.value = intent.getIntExtra(
+                                MonitorService.BATTERY_MONITOR_DATA_VALUE, 0
+                            )
+                        }
+                        BatteryMonitorDataType.RecordedDataStartDate -> {
+                            state.lastBatteryRecordStartTime.value = intent.getParcelableExtra(
+                                MonitorService.BATTERY_MONITOR_DATA_VALUE,
+                            )
+                        }
+                        BatteryMonitorDataType.RecordedDataStartTime -> {
+                            if (state.lastBatteryRecordStartTime.value != null) {
+                                val date = state.lastBatteryRecordStartTime.value!!
+                                val time = intent.getParcelableExtra(
+                                    MonitorService.BATTERY_MONITOR_DATA_VALUE,
+                                    LocalTime::class.java
+                                )!!
+                                state.lastBatteryRecordStartTime.value = Date(
+                                    date.year,
+                                    date.month,
+                                    date.day,
+                                    time.hour,
+                                    time.minute,
+                                    time.second
+                                )
+                            }
+                        }
+                        BatteryMonitorDataType.RecordedData -> {
+                            val data: Array<VoltageCurrent>? = intent.getParcelableArrayExtra(
+                                MonitorService.BATTERY_MONITOR_DATA_VALUE,
+                                VoltageCurrent::class.java
+                            )
+                            state.pendingChanges.add(ModelChangeAction(
+                                recordedData=data
+                            ))
+                        }
+                        BatteryMonitorDataType.RecordedDataIndex -> {
+                            val records: Array<BatteryMonitorHistoryRecord> = intent.getParcelableArrayExtra(
+                                MonitorService.BATTERY_MONITOR_DATA_VALUE,
+                                BatteryMonitorHistoryRecord::class.java
+                            )!!
+                            state.pendingChanges.add(ModelChangeAction(
+                                historyRecords = records
+                            ))
+                        }
+
                         else -> {
                         }
                     }
@@ -283,20 +341,6 @@ class MainActivity : ComponentActivity() {
                     state.unsaved.value = true
                 }
                 else -> {}
-            }
-        }
-    }
-
-    fun autoconnect() {
-        listOf(state.prefs.solarChargerAddress, state.prefs.batteryMonitorAddress).forEach { address ->
-            if (address != null) {
-                try {
-                    val dev: BluetoothDevice = bluetoothAdapter.getRemoteDevice(address)
-                    state.connectedDevices.add(dev)
-                    monitorService?.connect(dev)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Autoconnect error: ${e}")
-                }
             }
         }
     }
@@ -357,6 +401,7 @@ fun MainView(state: AppViewModel) {
             while (true) {
                 delay(SNAPSHOT_PERIOD)
                 state.snapshot()
+                state.syncPendingChanges()
                 if (state.unsaved.value) {
                     state.save(activity.dataStore)
                 }
@@ -382,8 +427,16 @@ fun MainView(state: AppViewModel) {
                 ChartsScreen(nav, state)
             }
         }
+        composable("history") {
+            Log.i(TAG, "Navigate to history")
+            Scaffold(
+                modifier = Modifier.fillMaxSize(),
+                bottomBar = { BottonNavBar(nav) }) { innerPadding ->
+                HistoryScreen(nav, state)
+            }
+        }
         composable("devices") {
-            Log.i(TAG, "Navigate to devices creen")
+            Log.i(TAG, "Navigate to devices")
             Scaffold(
                 modifier = Modifier.fillMaxSize(),
                 bottomBar = { BottonNavBar(nav) }) { innerPadding ->
@@ -406,6 +459,12 @@ fun BottonNavBar(nav: NavHostController) {
             selected = nav.currentDestination?.route == "charts",
             onClick = { nav.navigate("charts") },
             icon = { Icon(Icons.Outlined.LineAxis, null) },
+            label = { Text("Data Log") }
+        )
+        NavigationBarItem(
+            selected = nav.currentDestination?.route == "history",
+            onClick = { nav.navigate("history") },
+            icon = { Icon(Icons.Outlined.History, null) },
             label = { Text("History") }
         )
         NavigationBarItem(
@@ -472,7 +531,7 @@ fun BluetoothScanEffect(
     }
 }
 
-@OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterialApi::class)
+@OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun BluetoothDevicesScreen(nav: NavHostController, state: AppViewModel) {
     val context = LocalContext.current
@@ -621,8 +680,15 @@ fun BluetoothDevicesScreen(nav: NavHostController, state: AppViewModel) {
             ) {
                 Text(if (name != null) name else "Unnamed device")
                 if (state.connectedDevices.contains(device)) {
-                    Icon(imageVector = Icons.Filled.BluetoothConnected, contentDescription =null, tint = Color.Green )
-                    Text("Connected", style = Typography.labelSmall)
+                    val conn = activity.monitorService?.connections?.find { it.device == device }
+                    if (conn?.connectionState?.value == STATE_CONNECTED) {
+                        Icon(imageVector = Icons.Filled.BluetoothConnected, contentDescription =null, tint = Color.Green )
+                        Text("Connected", style = Typography.labelSmall)
+                    } else {
+                        Icon(imageVector = Icons.Filled.BluetoothSearching, contentDescription =null, tint = Color.DarkGray )
+                        Text("Connecting...", style = Typography.labelSmall)
+                        CircularProgressIndicator()
+                    }
                 }
             }
             HorizontalDivider()
@@ -668,7 +734,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
             refreshing = false
         }, 5000)
         var n = activity.monitorService!!.connections.size;
-        activity.monitorService?.sync{ action ->
+        activity.monitorService?.sync{ action, value ->
             n -= 1;
             refreshing = n > 0
         }
@@ -857,7 +923,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                         Icon(Icons.Filled.BluetoothDisabled, null, tint=Color.Red)
                     }
                     Text(
-                        if (state.batteryCharging.value) "Charging" else "Discarging",
+                        if (state.batteryCharging.value) "Charging" else "Discharging",
                         Modifier.padding(8.dp),
                         style = Typography.labelSmall
                     )
@@ -1001,7 +1067,6 @@ fun secondsToStr(seconds: Int): String {
     return "${hrs} hour${if (hrs == 1) "" else "s"}"
 }
 
-@OptIn(ExperimentalMaterialApi::class)
 @Composable
 fun ChartsScreen(nav: NavHostController, state: AppViewModel) {
     val solarPowerModelProducer = remember { state.solarPowerModelProducer }
@@ -1016,29 +1081,28 @@ fun ChartsScreen(nav: NavHostController, state: AppViewModel) {
         withContext(Dispatchers.Default) {
             while (true) {
                 state.mutex.withLock {
-                    val initial = state.history.firstOrNull()
-                    if (initial != null) {
-                        val t0 = initial.time.toInstant().epochSecond
-                        val x = state.history.map { it.time.toInstant().epochSecond - t0 }
+                    if (state.snapshots.isNotEmpty()) {
+                        val t0 = state.snapshots.first().date.toInstant().epochSecond
+                        val x = state.snapshots.map { it.date.toInstant().epochSecond - t0 }
                         solarPowerModelProducer.runTransaction {
                             lineSeries {
                                 series(
                                     x,
-                                    state.history.map { it.chargerCurrent * it.chargerVoltage })
+                                    state.snapshots.map { it.chargerCurrent * it.chargerVoltage })
                             }
                         }
                         batteryPowerModelProducer.runTransaction {
                             lineSeries {
                                 series(
                                     x,
-                                    state.history.map { it.batteryCurrent * it.batteryVoltage })
+                                    state.snapshots.map { it.batteryCurrent * it.batteryVoltage })
                             }
                         }
                         inverterPowerModelProducer.runTransaction {
                             lineSeries {
                                 series(
                                     x,
-                                    state.history.map {
+                                    state.snapshots.map {
                                         max(
                                             0.0,
                                             // If charger or battery monitor is not connected don't show this
@@ -1054,26 +1118,26 @@ fun ChartsScreen(nav: NavHostController, state: AppViewModel) {
                             lineSeries {
                                 series(
                                     x,
-                                    state.history.map { it.chargerCurrent })
+                                    state.snapshots.map { it.chargerCurrent })
                                 series(
                                     x,
-                                    state.history.map { it.chargerCurrent - it.batteryCurrent })
+                                    state.snapshots.map { it.chargerCurrent - it.batteryCurrent })
                                 series(
                                     x,
-                                    state.history.map { it.batteryCurrent })
+                                    state.snapshots.map { it.batteryCurrent })
                             }
                         }
                         voltagesModelProducer.runTransaction {
                             lineSeries {
                                 series(
                                     x,
-                                    state.history.map { it.solarVoltage })
+                                    state.snapshots.map { it.solarVoltage })
                                 series(
                                     x,
-                                    state.history.map { it.chargerVoltage })
+                                    state.snapshots.map { it.chargerVoltage })
                                 series(
                                     x,
-                                    state.history.map { it.batteryVoltage })
+                                    state.snapshots.map { it.batteryVoltage })
                             }
                         }
                     }
@@ -1315,31 +1379,279 @@ fun ChartsScreen(nav: NavHostController, state: AppViewModel) {
 //                .height(300.dp)
 //                .fillMaxWidth()
 //        )
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            var autoscrollExpanded by remember {mutableStateOf(false) }
-            FilledTonalButton(onClick = {autoscrollExpanded = !autoscrollExpanded}) {
-                Text("Autoscroll: ${if (state.chartAutoscroll.value) "On" else "Off"}")
-                Icon(Icons.Filled.ArrowDropDown, null)
-            }
-            DropdownMenu(expanded = autoscrollExpanded, onDismissRequest = { autoscrollExpanded = false }) {
-                DropdownMenuItem(onClick = {state.chartAutoscroll.value = false}, text={Text("Off")})
-                DropdownMenuItem(onClick = {state.chartAutoscroll.value = true}, text={Text("On")})
+        ChartControls(
+            autoscroll = state.chartAutoscroll.value,
+            onAutoscrollChanged = {state.chartAutoscroll.value = it},
+            xstep = state.chartXStep.value,
+            xstepToString = {secondsToStr(it.toInt() * 6)},
+            onXStepChanged = {state.chartXStep.value = it; zoom = it*6}
+        )
+    }
+}
 
-            }
+@Composable
+fun ChartControls(
+    autoscroll: Boolean,
+    onAutoscrollChanged: (value: Boolean)->Unit,
+    xstep: Double,
+    xstepToString: (value: Double) -> String,
+    onXStepChanged: (value: Double)-> Unit
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        var autoscrollExpanded by remember {mutableStateOf(false) }
+        FilledTonalButton(onClick = {autoscrollExpanded = !autoscrollExpanded}) {
+            Text("Autoscroll: ${if (autoscroll) "On" else "Off"}")
+            Icon(Icons.Filled.ArrowDropDown, null)
+        }
+        DropdownMenu(expanded = autoscrollExpanded, onDismissRequest = { autoscrollExpanded = false }) {
+            DropdownMenuItem(onClick = {onAutoscrollChanged(false)}, text={Text("Off")})
+            DropdownMenuItem(onClick = {onAutoscrollChanged(true)}, text={Text("On")})
+        }
 
-            var timePeriodsExpanded by remember {mutableStateOf(false) }
-            var timePeriods = remember{listOf(10, 50, 100, 300, 600, 1200)}
-            FilledTonalButton(onClick = {timePeriodsExpanded = !timePeriodsExpanded}) {
-                Text("Time Span: ${secondsToStr(state.chartXStep.value.toInt()*6)}")
-                Icon(Icons.Filled.ArrowDropDown, null)
-            }
-            DropdownMenu(expanded = timePeriodsExpanded, onDismissRequest = { timePeriodsExpanded = false }) {
-                timePeriods.forEach {
-                    DropdownMenuItem(onClick = { state.chartXStep.value = it.toDouble(); zoom = state.chartXStep.value*6; timePeriodsExpanded = false }, text={Text(
-                        secondsToStr(it*6)
-                    )})
-                }
+        var timePeriodsExpanded by remember {mutableStateOf(false) }
+        var timePeriods = remember{listOf(10, 50, 100, 300, 600, 1200)}
+        FilledTonalButton(onClick = {timePeriodsExpanded = !timePeriodsExpanded}) {
+            Text("Time Span: ${xstepToString(xstep)}")
+            Icon(Icons.Filled.ArrowDropDown, null)
+        }
+        DropdownMenu(expanded = timePeriodsExpanded, onDismissRequest = { timePeriodsExpanded = false }) {
+            timePeriods.forEach {
+                DropdownMenuItem(onClick = { onXStepChanged(it.toDouble()); timePeriodsExpanded = false }, text={Text(
+                    xstepToString(it.toDouble())
+                )})
             }
         }
     }
+}
+
+@OptIn(ExperimentalMaterialApi::class, ExperimentalStdlibApi::class)
+@Composable
+fun HistoryScreen(nav: NavHostController, state: AppViewModel) {
+    val context = LocalContext.current
+    val activity = context.getActivity<MainActivity>()!!
+    val batteryModelProducer = remember { state.batteryRecordedDataModelProducer }
+    val chargerHistoryModelProducer = remember { state.chargerHistoryModelProducer }
+
+    var loading by remember {mutableStateOf(false)}
+    var zoom by remember {mutableStateOf(state.historyXStep.value * 6) }
+    val batteryMonitor = activity.monitorService?.connections?.find{
+        it.deviceType.value == DeviceType.BatteryMonitor}
+    val solarCharger = activity.monitorService?.connections?.find{
+        it.deviceType.value == DeviceType.SolarCharger}
+
+
+    LaunchedEffect(Unit) {
+        Log.d(TAG, "New launch")
+        withContext(Dispatchers.Default) {
+            while (true) {
+                state.mutex.withLock {
+                    if (state.batteryRecordedData.isNotEmpty()) {
+                        batteryModelProducer.runTransaction {
+                            lineSeries {
+                                series(
+                                    state.batteryRecordedData.mapIndexed { index, voltageCurrent -> index },
+                                    state.batteryRecordedData.map { it.voltage * it.current })
+                            }
+                        }
+                    }
+                    if (state.chargerHistoryData.isNotEmpty()) {
+                        chargerHistoryModelProducer.runTransaction {
+                            lineSeries {
+                                series(
+                                    state.chargerHistoryData.map { it.key },
+                                    state.chargerHistoryData.map{ it.value.totalEnergy }
+                                )
+                            }
+                        }
+                    }
+                }
+                delay(1000)
+            }
+        }
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(8.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        if (loading) {
+            Text("Loading...")
+            LinearProgressIndicator()
+        }
+        if (batteryMonitor != null && batteryMonitor!!.connectionState.value == STATE_CONNECTED) {
+            if (state.batteryRecordMinutes.value > 0) {
+                LaunchedEffect(Unit) {
+                    loading = true
+                    batteryMonitor!!.writeCommand(
+                        BatteryMonitorCommands.RECORD_HISTORY,
+                        5000
+                    ) { action, value -> loading = false }
+                }
+                var recordingSelectExpanded by remember { mutableStateOf(false) }
+                if (state.batteryHistoryRecords.size > 0) {
+                    FilledTonalButton(
+                        onClick = { recordingSelectExpanded = !recordingSelectExpanded },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Recordings")
+                        Icon(Icons.Filled.ArrowDropDown, null)
+                    }
+                    DropdownMenu(
+                        expanded = recordingSelectExpanded,
+                        onDismissRequest = { recordingSelectExpanded = false }) {
+                        state.batteryHistoryRecords.forEach { record ->
+                            DropdownMenuItem(onClick = {
+                                recordingSelectExpanded = false
+                                loading = true
+                                state.pendingChanges.add(ModelChangeAction(clearRecordedData = true))
+                                fun loadRecording(i: Int) {
+                                    batteryMonitor!!.writeAllCommands(
+                                        BatteryMonitorCommands.loadRecording(5, i),
+                                        3000
+                                    ) { action, value ->
+                                        if (i + 5 < record.size) {
+                                            activity.handler.postDelayed({
+                                                loadRecording(i + 5)
+                                            }, 500)
+                                        } else {
+                                            loading = false
+                                        }
+                                    }
+                                }
+                                loadRecording(0)
+                            }, text = {
+                                Text("${record.date} (${record.size})")
+                            })
+                        }
+                    }
+                }
+            } else {
+                Text("No recordings or data not yet loaded")
+            }
+        } else {
+            Text("Battery monitor is not connected")
+        }
+
+        Text(
+            "Battery Power",
+            style = Typography.headlineSmall,
+            fontWeight = FontWeight.Light
+        )
+        if (state.batteryRecordedData.isNotEmpty()) {
+            CartesianChartHost(
+                chart = rememberCartesianChart(
+                    rememberLineCartesianLayer(
+                        LineCartesianLayer.LineProvider.series(
+                            rememberLine(
+                                fill =
+                                remember(batteryPowerChartColors) {
+                                    LineCartesianLayer.LineFill.double(
+                                        fill(batteryPowerChartColors[0]),
+                                        fill(batteryPowerChartColors[1])
+                                    )
+                                }
+                            )
+                        )
+                    ),
+                    getXStep = { state.historyXStep.value },
+                    startAxis = rememberStartAxis(
+                        horizontalLabelPosition = VerticalAxis.HorizontalLabelPosition.Inside,
+                        titleComponent = rememberTextComponent(),
+                        title = "Power (Watts)"
+                    ),
+                    bottomAxis = rememberBottomAxis(
+                        guideline = null,
+                        titleComponent = rememberTextComponent(),
+                        title = "Time (Seconds)"
+                    ),
+                    //marker = rememberMarker(),
+                ),
+                modelProducer = batteryModelProducer,
+                zoomState = rememberVicoZoomState(zoomEnabled = false, initialZoom = Zoom.x(zoom)),
+                scrollState = rememberVicoScrollState(
+                    initialScroll = Scroll.Absolute.End,
+                    autoScroll = Scroll.Absolute.End,
+                    autoScrollCondition = if (state.historyAutoscroll.value) AutoScrollCondition.OnModelSizeIncreased else AutoScrollCondition.Never
+                ),
+                modifier = Modifier
+                    .height(200.dp)
+                    .fillMaxWidth()
+            )
+
+            ChartControls(
+                autoscroll = state.historyAutoscroll.value,
+                onAutoscrollChanged = { state.historyAutoscroll.value = it },
+                xstep = state.historyXStep.value,
+                xstepToString = { secondsToStr(it.toInt() * 6) },
+                onXStepChanged = { zoom = it * 6; state.historyXStep.value = it; }
+            )
+        } else {
+            Text("No history data is available")
+        }
+
+        Text(
+            "Charger History",
+            style = Typography.headlineSmall,
+            fontWeight = FontWeight.Light
+        )
+        if (solarCharger != null && solarCharger!!.connectionState.value == STATE_CONNECTED) {
+            LaunchedEffect(Unit) {
+                solarCharger!!.writeAllCommands(
+                    listOf(
+                        SolarChargerCommands.loadHistory(1),
+                        SolarChargerCommands.loadHistory(2),
+                        SolarChargerCommands.loadHistory(3),
+                        SolarChargerCommands.loadHistory(4),
+                        SolarChargerCommands.loadHistory(5),
+                    ),
+                    3000
+                ) {  action, value -> loading = false }
+            }
+        } else {
+            Text("No history data is available")
+        }
+
+        if (state.chargerHistoryData.isNotEmpty()) {
+            CartesianChartHost(
+                chart = rememberCartesianChart(
+                    rememberLineCartesianLayer(
+                        LineCartesianLayer.LineProvider.series(
+                            rememberLine(
+                                fill = remember {
+                                    LineCartesianLayer.LineFill.single(
+                                        fill(
+                                            Color(
+                                                0xfff283ff
+                                            )
+                                        )
+                                    )
+                                },
+                            )
+                        )
+                    ),
+                    getXStep = { state.chartXStep.value },
+                    startAxis = rememberStartAxis(
+                        horizontalLabelPosition = VerticalAxis.HorizontalLabelPosition.Inside,
+                        titleComponent = rememberTextComponent(),
+                        title = "Power (Watts)"
+                    ),
+                    bottomAxis = rememberBottomAxis(
+                        guideline = null,
+                        title = "Time (Seconds)",
+                        titleComponent = rememberTextComponent(),
+                    ),
+                ),
+                modelProducer = chargerHistoryModelProducer,
+                zoomState = rememberVicoZoomState(zoomEnabled = false),
+                scrollState = rememberVicoScrollState(),
+                modifier = Modifier
+                    .height(200.dp)
+                    .fillMaxWidth()
+            )
+
+        }
+    }
+
 }
