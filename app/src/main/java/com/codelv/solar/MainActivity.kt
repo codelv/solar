@@ -77,6 +77,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import com.patrykandpatrick.vico.core.common.shape.Shape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -101,27 +102,37 @@ import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottomAxis
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStartAxis
+import com.patrykandpatrick.vico.compose.cartesian.decoration.rememberHorizontalLine
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLine
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
 import com.patrykandpatrick.vico.compose.cartesian.rememberVicoScrollState
 import com.patrykandpatrick.vico.compose.cartesian.rememberVicoZoomState
+import com.patrykandpatrick.vico.compose.common.component.rememberLineComponent
+import com.patrykandpatrick.vico.compose.common.component.rememberShapeComponent
 import com.patrykandpatrick.vico.compose.common.component.rememberTextComponent
 import com.patrykandpatrick.vico.compose.common.fill
+import com.patrykandpatrick.vico.compose.common.of
 import com.patrykandpatrick.vico.core.cartesian.AutoScrollCondition
 import com.patrykandpatrick.vico.core.cartesian.Scroll
 import com.patrykandpatrick.vico.core.cartesian.Zoom
+import com.patrykandpatrick.vico.core.cartesian.axis.AxisPosition
 import com.patrykandpatrick.vico.core.cartesian.axis.VerticalAxis
+import com.patrykandpatrick.vico.core.cartesian.data.CartesianValueFormatter
 import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
 import com.patrykandpatrick.vico.core.cartesian.layer.LineCartesianLayer
+import com.patrykandpatrick.vico.core.common.Dimensions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.time.LocalDate
 import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 import java.util.Date
 import kotlin.math.max
+import kotlin.math.roundToLong
 
 const val SNAPSHOT_PERIOD: Long = 1000
 
@@ -829,6 +840,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                         Text(
                             text = "Min ${"%.2f".format(state.chargerMinVoltage.value)}V Max ${"%.2f".format(state.chargerMaxVoltage.value)}V",
                             style = Typography.bodySmall
+
                         )
                         Text("Current", style = Typography.labelSmall)
                         Text(
@@ -895,18 +907,38 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                             style = Typography.headlineSmall
                         )
                     }
-                    Column(
+                   Column(
                         Modifier
                             .padding(8.dp)
                             .fillMaxWidth()
                             .weight(2f)
                     ) {
-                        Text("Energy usage", style = Typography.labelSmall)
+                       Text("Time remaining", style = Typography.labelSmall)
+
+                       var text = "N/A"
+                       if (state.inverterCurrent.value > 0 && state.batteryRemainingAh.value > 0) {
+                           var remainingTime = (60*state.batteryRemainingAh.value / state.inverterCurrent.value).toInt()
+                           val hours = remainingTime / 60
+                           val minutes = remainingTime % 60
+                           text = "${hours}h ${minutes}min"
+                       }
                         Text(
-                            text = "${"%.0f".format(state.inverterEnergy.value)}Wh",
+                            text = text,
                             style = Typography.displaySmall
                         )
                     }
+//                    Column(
+//                        Modifier
+//                            .padding(8.dp)
+//                            .fillMaxWidth()
+//                            .weight(2f)
+//                    ) {
+//                        Text("Energy usage", style = Typography.labelSmall)
+//                        Text(
+//                            text = "${"%.0f".format(state.inverterEnergy.value)}Wh",
+//                            style = Typography.displaySmall
+//                        )
+//                    }
                 }
             }
             HorizontalDivider()
@@ -1424,6 +1456,11 @@ fun ChartControls(
     }
 }
 
+val dateFormatter = DateTimeFormatter.ofPattern("LLL d")
+val avgColor = Color(
+    0xff91b1fd
+)
+
 @OptIn(ExperimentalMaterialApi::class, ExperimentalStdlibApi::class)
 @Composable
 fun HistoryScreen(nav: NavHostController, state: AppViewModel) {
@@ -1431,8 +1468,13 @@ fun HistoryScreen(nav: NavHostController, state: AppViewModel) {
     val activity = context.getActivity<MainActivity>()!!
     val batteryModelProducer = remember { state.batteryRecordedDataModelProducer }
     val chargerHistoryModelProducer = remember { state.chargerHistoryModelProducer }
+    var chargerHistoryCount by remember { mutableStateOf(0) }
+    var chargerHistoryMin by remember { mutableStateOf(0.0) }
+    var chargerHistoryMax by remember { mutableStateOf(0.0) }
+    var chargerHistoryAvg by remember { mutableStateOf(0.0) }
 
-    var loading by remember {mutableStateOf(false)}
+    var batteryLoading by remember {mutableStateOf(false)}
+    var chargerLoading by remember {mutableStateOf(false)}
     var zoom by remember {mutableStateOf(state.historyXStep.value * 6) }
     val batteryMonitor = activity.monitorService?.connections?.find{
         it.deviceType.value == DeviceType.BatteryMonitor}
@@ -1441,7 +1483,6 @@ fun HistoryScreen(nav: NavHostController, state: AppViewModel) {
 
 
     LaunchedEffect(Unit) {
-        Log.d(TAG, "New launch")
         withContext(Dispatchers.Default) {
             while (true) {
                 state.mutex.withLock {
@@ -1455,10 +1496,17 @@ fun HistoryScreen(nav: NavHostController, state: AppViewModel) {
                         }
                     }
                     if (state.chargerHistoryData.isNotEmpty()) {
+                        chargerHistoryCount = state.chargerHistoryData.size
+                        chargerHistoryMin = state.chargerHistoryData.minOf{it.value.totalEnergy}
+                        chargerHistoryMax = state.chargerHistoryData.maxOf{it.value.totalEnergy}
+                        var sum = 0.0
+                        state.chargerHistoryData.forEach{ sum += it.value.totalEnergy}
+                        chargerHistoryAvg = sum / chargerHistoryCount
+
                         chargerHistoryModelProducer.runTransaction {
                             lineSeries {
                                 series(
-                                    state.chargerHistoryData.map { it.key },
+                                    state.chargerHistoryData.map { -it.key },
                                     state.chargerHistoryData.map{ it.value.totalEnergy }
                                 )
                             }
@@ -1476,143 +1524,130 @@ fun HistoryScreen(nav: NavHostController, state: AppViewModel) {
             .padding(8.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        if (loading) {
-            Text("Loading...")
-            LinearProgressIndicator()
-        }
-        if (batteryMonitor != null && batteryMonitor!!.connectionState.value == STATE_CONNECTED) {
-            if (state.batteryRecordMinutes.value > 0) {
-                LaunchedEffect(Unit) {
-                    loading = true
-                    batteryMonitor!!.writeCommand(
-                        BatteryMonitorCommands.RECORD_HISTORY,
-                        5000
-                    ) { action, value -> loading = false }
-                }
-                var recordingSelectExpanded by remember { mutableStateOf(false) }
-                if (state.batteryHistoryRecords.size > 0) {
-                    FilledTonalButton(
-                        onClick = { recordingSelectExpanded = !recordingSelectExpanded },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Recordings")
-                        Icon(Icons.Filled.ArrowDropDown, null)
-                    }
-                    DropdownMenu(
-                        expanded = recordingSelectExpanded,
-                        onDismissRequest = { recordingSelectExpanded = false }) {
-                        state.batteryHistoryRecords.forEach { record ->
-                            DropdownMenuItem(onClick = {
-                                recordingSelectExpanded = false
-                                loading = true
-                                state.pendingChanges.add(ModelChangeAction(clearRecordedData = true))
-                                fun loadRecording(i: Int) {
-                                    batteryMonitor!!.writeAllCommands(
-                                        BatteryMonitorCommands.loadRecording(5, i),
-                                        3000
-                                    ) { action, value ->
-                                        if (i + 5 < record.size) {
-                                            activity.handler.postDelayed({
-                                                loadRecording(i + 5)
-                                            }, 500)
-                                        } else {
-                                            loading = false
-                                        }
-                                    }
-                                }
-                                loadRecording(0)
-                            }, text = {
-                                Text("${record.date} (${record.size})")
-                            })
-                        }
-                    }
-                }
-            } else {
-                Text("No recordings or data not yet loaded")
-            }
-        } else {
-            Text("Battery monitor is not connected")
-        }
-
-        Text(
-            "Battery Power",
-            style = Typography.headlineSmall,
-            fontWeight = FontWeight.Light
-        )
-        if (state.batteryRecordedData.isNotEmpty()) {
-            CartesianChartHost(
-                chart = rememberCartesianChart(
-                    rememberLineCartesianLayer(
-                        LineCartesianLayer.LineProvider.series(
-                            rememberLine(
-                                fill =
-                                remember(batteryPowerChartColors) {
-                                    LineCartesianLayer.LineFill.double(
-                                        fill(batteryPowerChartColors[0]),
-                                        fill(batteryPowerChartColors[1])
-                                    )
-                                }
-                            )
-                        )
-                    ),
-                    getXStep = { state.historyXStep.value },
-                    startAxis = rememberStartAxis(
-                        horizontalLabelPosition = VerticalAxis.HorizontalLabelPosition.Inside,
-                        titleComponent = rememberTextComponent(),
-                        title = "Power (Watts)"
-                    ),
-                    bottomAxis = rememberBottomAxis(
-                        guideline = null,
-                        titleComponent = rememberTextComponent(),
-                        title = "Time (Seconds)"
-                    ),
-                    //marker = rememberMarker(),
-                ),
-                modelProducer = batteryModelProducer,
-                zoomState = rememberVicoZoomState(zoomEnabled = false, initialZoom = Zoom.x(zoom)),
-                scrollState = rememberVicoScrollState(
-                    initialScroll = Scroll.Absolute.End,
-                    autoScroll = Scroll.Absolute.End,
-                    autoScrollCondition = if (state.historyAutoscroll.value) AutoScrollCondition.OnModelSizeIncreased else AutoScrollCondition.Never
-                ),
-                modifier = Modifier
-                    .height(200.dp)
-                    .fillMaxWidth()
-            )
-
-            ChartControls(
-                autoscroll = state.historyAutoscroll.value,
-                onAutoscrollChanged = { state.historyAutoscroll.value = it },
-                xstep = state.historyXStep.value,
-                xstepToString = { secondsToStr(it.toInt() * 6) },
-                onXStepChanged = { zoom = it * 6; state.historyXStep.value = it; }
-            )
-        } else {
-            Text("No history data is available")
-        }
+//        if (batteryMonitor != null && batteryMonitor!!.connectionState.value == STATE_CONNECTED) {
+//            if (state.batteryRecordMinutes.value > 0) {
+//                LaunchedEffect(Unit) {
+//                    batteryLoading = true
+//                    batteryMonitor!!.writeCommand(
+//                        BatteryMonitorCommands.RECORD_HISTORY,
+//                        5000
+//                    ) { action, value -> batteryLoading = false }
+//                }
+//                var recordingSelectExpanded by remember { mutableStateOf(false) }
+//                if (state.batteryHistoryRecords.size > 0) {
+//                    FilledTonalButton(
+//                        onClick = { recordingSelectExpanded = !recordingSelectExpanded },
+//                        modifier = Modifier.fillMaxWidth()
+//                    ) {
+//                        Text("Recordings")
+//                        Icon(Icons.Filled.ArrowDropDown, null)
+//                    }
+//                    DropdownMenu(
+//                        expanded = recordingSelectExpanded,
+//                        onDismissRequest = { recordingSelectExpanded = false }) {
+//                        state.batteryHistoryRecords.forEach { record ->
+//                            DropdownMenuItem(onClick = {
+//                                recordingSelectExpanded = false
+//                                batteryLoading = true
+//                                state.pendingChanges.add(ModelChangeAction(clearRecordedData = true))
+//                                fun loadRecording(i: Int) {
+//                                    batteryMonitor!!.writeAllCommands(
+//                                        BatteryMonitorCommands.loadRecording(5, i),
+//                                        3000
+//                                    ) { action, value ->
+//                                        if (i + 5 < record.size) {
+//                                            activity.handler.postDelayed({
+//                                                loadRecording(i + 5)
+//                                            }, 500)
+//                                        } else {
+//                                            batteryLoading = false
+//                                        }
+//                                    }
+//                                }
+//                                loadRecording(0)
+//                            }, text = {
+//                                Text("${record.date} (${record.size})")
+//                            })
+//                        }
+//                    }
+//                }
+//            } else {
+//                Text("No recordings or data not yet loaded")
+//            }
+//        } else {
+//            Text("Battery monitor is not connected")
+//        }
+//
+//        Text(
+//            "Battery Power",
+//            style = Typography.headlineSmall,
+//            fontWeight = FontWeight.Light
+//        )
+//        if (batteryLoading) {
+//            Text("Loading battery data...")
+//            LinearProgressIndicator(Modifier.fillMaxWidth())
+//        }
+//        if (state.batteryRecordedData.isNotEmpty()) {
+//            CartesianChartHost(
+//                chart = rememberCartesianChart(
+//                    rememberLineCartesianLayer(
+//                        LineCartesianLayer.LineProvider.series(
+//                            rememberLine(
+//                                fill =
+//                                remember(batteryPowerChartColors) {
+//                                    LineCartesianLayer.LineFill.double(
+//                                        fill(batteryPowerChartColors[0]),
+//                                        fill(batteryPowerChartColors[1])
+//                                    )
+//                                }
+//                            )
+//                        )
+//                    ),
+//                    getXStep = { state.historyXStep.value },
+//                    startAxis = rememberStartAxis(
+//                        horizontalLabelPosition = VerticalAxis.HorizontalLabelPosition.Inside,
+//                        titleComponent = rememberTextComponent(),
+//                        title = "Power (Watts)"
+//                    ),
+//                    bottomAxis = rememberBottomAxis(
+//                        guideline = null,
+//                        titleComponent = rememberTextComponent(),
+//                        title = "Time (Seconds)"
+//                    ),
+//                    //marker = rememberMarker(),
+//                ),
+//                modelProducer = batteryModelProducer,
+//                zoomState = rememberVicoZoomState(zoomEnabled = false, initialZoom = Zoom.x(zoom)),
+//                scrollState = rememberVicoScrollState(
+//                    initialScroll = Scroll.Absolute.End,
+//                    autoScroll = Scroll.Absolute.End,
+//                    autoScrollCondition = if (state.historyAutoscroll.value) AutoScrollCondition.OnModelSizeIncreased else AutoScrollCondition.Never
+//                ),
+//                modifier = Modifier
+//                    .height(200.dp)
+//                    .fillMaxWidth()
+//            )
+//
+//            ChartControls(
+//                autoscroll = state.historyAutoscroll.value,
+//                onAutoscrollChanged = { state.historyAutoscroll.value = it },
+//                xstep = state.historyXStep.value,
+//                xstepToString = { secondsToStr(it.toInt() * 6) },
+//                onXStepChanged = { zoom = it * 6; state.historyXStep.value = it; }
+//            )
+//        } else {
+//            Text("No battery history data is available")
+//        }
 
         Text(
             "Charger History",
             style = Typography.headlineSmall,
             fontWeight = FontWeight.Light
         )
-        if (solarCharger != null && solarCharger!!.connectionState.value == STATE_CONNECTED) {
-            LaunchedEffect(Unit) {
-                solarCharger!!.writeAllCommands(
-                    listOf(
-                        SolarChargerCommands.loadHistory(1),
-                        SolarChargerCommands.loadHistory(2),
-                        SolarChargerCommands.loadHistory(3),
-                        SolarChargerCommands.loadHistory(4),
-                        SolarChargerCommands.loadHistory(5),
-                    ),
-                    3000
-                ) {  action, value -> loading = false }
-            }
-        } else {
-            Text("No history data is available")
+        if (chargerLoading) {
+            Text("Loading...")
+            LinearProgressIndicator(Modifier.fillMaxWidth())
         }
-
         if (state.chargerHistoryData.isNotEmpty()) {
             CartesianChartHost(
                 chart = rememberCartesianChart(
@@ -1631,26 +1666,128 @@ fun HistoryScreen(nav: NavHostController, state: AppViewModel) {
                             )
                         )
                     ),
-                    getXStep = { state.chartXStep.value },
                     startAxis = rememberStartAxis(
                         horizontalLabelPosition = VerticalAxis.HorizontalLabelPosition.Inside,
                         titleComponent = rememberTextComponent(),
-                        title = "Power (Watts)"
+                        title = "Energy (kWh)"
                     ),
                     bottomAxis = rememberBottomAxis(
                         guideline = null,
-                        title = "Time (Seconds)",
+                        title = "Date",
+                        valueFormatter = remember {
+                            CartesianValueFormatter { value, chartValues, position ->
+                                if (value.toInt() == 0)
+                                    "Today"
+                                else
+                                    LocalDate.now().minusDays(-value.toLong()).format(dateFormatter)
+                            }
+                        },
                         titleComponent = rememberTextComponent(),
                     ),
+                    marker = rememberMarker(),
+                    decorations = listOf(rememberHorizontalLine(
+                        y = { chargerHistoryAvg.toLong().toDouble() },
+                        line = rememberLineComponent(avgColor, 1.dp),
+                        labelComponent =
+                        rememberTextComponent(
+                            margins = Dimensions.of(4.dp),
+                            padding =
+                            Dimensions.of(8.dp, 2.dp),
+                            background = rememberShapeComponent(avgColor, Shape.Pill),
+                        ),
+                    )),
                 ),
                 modelProducer = chargerHistoryModelProducer,
-                zoomState = rememberVicoZoomState(zoomEnabled = false),
+                zoomState = rememberVicoZoomState(zoomEnabled = false, initialZoom = Zoom.x(7.0)),
                 scrollState = rememberVicoScrollState(),
                 modifier = Modifier
-                    .height(200.dp)
+                    .height(300.dp)
                     .fillMaxWidth()
             )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween){
+                Column {
+                    Text("Min", style= Typography.labelSmall)
+                    Text(
+                        "${"% .0f".format(chargerHistoryMin)}Wh",
+                        style = Typography.bodySmall
+                    )
+                }
+                Column {
+                    Text("Max", style= Typography.labelSmall)
+                    Text("${"%.0f".format(chargerHistoryMax)}Wh",
+                        style = Typography.bodySmall
+                    )
+                }
+                Column {
+                    Text("Avg", style= Typography.labelSmall)
+                    Text(
+                        "${"%.0f".format(chargerHistoryAvg)}Wh",
+                        style = Typography.bodySmall
+                    )
+                }
+                Column {
+                    Text("Days", style= Typography.labelSmall)
+                    Text(
+                        "${chargerHistoryCount}",
+                        style = Typography.bodySmall
+                    )
+                }
+            }
 
+        }
+        if (solarCharger != null && solarCharger!!.connectionState.value == STATE_CONNECTED) {
+            fun loadChargerHistory(days: Int) {
+                var i = 0
+                chargerLoading = true
+                activity.handler.postDelayed({
+                    // Loading timeout
+                    if (chargerLoading) {
+                        chargerLoading = false
+                    }
+                }, days.toLong()*3000)
+                solarCharger!!.writeAllCommands(
+                    (0..days).map { SolarChargerCommands.loadHistory(it) },
+                    2000
+                ) { action, value ->
+                    i += 1
+                    if (i >= days) {
+                        chargerLoading = false
+                    }
+                }
+            }
+
+            LaunchedEffect(Unit) {
+                if (state.chargerHistoryData.size <= 1) {
+                    state.pendingChanges.add(ModelChangeAction(clearChargerHistory = true))
+                    loadChargerHistory(state.batteryHistoryNumberOfDays.value)
+                }
+            }
+
+            if (!chargerLoading) {
+                var reloadDropdown by remember { mutableStateOf(false) }
+                FilledTonalButton(
+                    onClick = {
+                        reloadDropdown = true
+
+                   },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Reload history")
+                    Icon(Icons.Filled.ArrowDropDown, null)
+                }
+                var reloadDaysItems = listOf(7, 14, 30, 60, 90, 120)
+                DropdownMenu(expanded = reloadDropdown, onDismissRequest = {reloadDropdown = false }) {
+                    reloadDaysItems.forEach {
+                        DropdownMenuItem(text = { Text("${it} days") }, onClick = {
+                            state.batteryHistoryNumberOfDays.value = it
+                            state.pendingChanges.add(ModelChangeAction(clearChargerHistory = true))
+                            loadChargerHistory(it)
+                        })
+                    }
+                }
+            }
+        } else {
+            Text("Solar charger is not connected")
         }
     }
 

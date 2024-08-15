@@ -88,8 +88,14 @@ enum class BluetoothActionType {
     Read, // Callback on read
     Write, // Callback on write
     WriteRead, // Callback on next change response
-    Change, // Callback on next change response
 }
+
+enum class BluetoothActionStatus {
+    Pending,
+    Complete,
+    Aborted
+}
+
 
 data class BluetoothAction(
     val type: BluetoothActionType,
@@ -99,8 +105,11 @@ data class BluetoothAction(
     var value: ByteArray? = null,
     // Optional callback to invoke when the action is completed
     var callback: ((action: BluetoothAction, value: ByteArray?) -> Unit)? = null,
-    var timeout: Int = 0,
-)
+    var timeout: Int = 5000,
+    var status: BluetoothActionStatus = BluetoothActionStatus.Pending
+) {
+
+}
 
 enum class SolarChargerDataType(val code: Int) {
     ChargeVoltage(0x01),
@@ -249,7 +258,6 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
     var bluetoothGatt: BluetoothGatt? = null
     var pendingActions: MutableList<BluetoothAction> = mutableListOf()
     var currentAction: BluetoothAction? = null
-    var changeListeners = mutableListOf<BluetoothAction>()
     var lastCharacteristicWrite: MutableState<ByteArray> = mutableStateOf(byteArrayOf())
     var lastCharacteristicRead: MutableState<ByteArray> = mutableStateOf(byteArrayOf())
 
@@ -373,6 +381,7 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
         if (values.size > 1) {
             return writeCommand(values.first(), timeout, read) { action, value ->
                 callback?.invoke(action, value)
+                action.status = BluetoothActionStatus.Complete
                 writeAllCommands(values.subList(1, values.size), timeout, read, callback)
             }
         } else if (values.size == 1) {
@@ -392,30 +401,36 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
 
     @RequiresPermission(BLUETOOTH_CONNECT)
     fun abortAction(action: BluetoothAction) {
-        // Only one can occur at a time
-        if (changeListeners.contains(action)) {
-            changeListeners.remove(action)
-            Log.d(tag, "Queued change observer timeout")
-        }
         if (pendingActions.contains(action)) {
             Log.d(tag, "Queued action aborted")
             pendingActions.remove(action)
-        } else if (currentAction == action) {
-            Log.d(tag, "Pending action aborted")
+        }
+        if (action.status == BluetoothActionStatus.Pending) {
+            finishAction(action, null, true)
+        }
+        if (action == currentAction) {
+            currentAction = null
             processNextAction()
+        }
+    }
+
+    fun finishAction(action: BluetoothAction, value: ByteArray? = null, aborted: Boolean) {
+        if (action?.callback != null && action?.status == BluetoothActionStatus.Pending) {
+            try {
+                Log.d(tag, "Invoking action callback")
+                action.callback?.invoke(action!!, value)
+                action.status = if (aborted) BluetoothActionStatus.Aborted else BluetoothActionStatus.Complete
+            } catch (e: Exception) {
+                Log.e(tag, "Callback exception: ${e}")
+            }
         }
     }
 
     @RequiresPermission(BLUETOOTH_CONNECT)
     fun processNextAction(value: ByteArray? = null) {
         // Only one can occur at a time
-        if (currentAction != null && currentAction?.callback != null) {
-            try {
-                Log.d(tag, "Invoking action callback")
-                currentAction?.callback?.invoke(currentAction!!, value)
-            } catch (e: Exception) {
-                Log.e(tag, "Callback exception: ${e}")
-            }
+        if (currentAction != null) {
+            finishAction(currentAction!!, value, false)
         }
         if (pendingActions.size > 0) {
             var action = pendingActions.removeAt(0)
@@ -436,11 +451,6 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                         )
                         bluetoothGatt?.writeCharacteristic(characteristic)
                     }
-                    BluetoothActionType.Change -> {
-                        if (action.callback != null) {
-                            changeListeners.add(action)
-                        }
-                    }
                     else -> {}
                 }
             } else if (action.descriptor != null) {
@@ -458,11 +468,6 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                         )
                         bluetoothGatt?.writeDescriptor(desc)
                     }
-                    BluetoothActionType.Change -> {
-                        if (action.callback != null) {
-                            changeListeners.add(action)
-                        }
-                    }
                     else -> {}
                 }
             } else {
@@ -470,10 +475,9 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
             }
 
             if (action.timeout > 0) {
-                handler.postDelayed({
-                    abortAction(action)
-                }, action.timeout.toLong())
+                handler.postDelayed({ abortAction(action) }, action.timeout.toLong())
             }
+
         } else {
             currentAction = null;
             // Log.d(tag, "No more actions")
@@ -660,14 +664,12 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
             lastCharacteristicRead.value = characteristic.value;
             if (currentAction != null) {
                 val action = currentAction!!
-                if (action.characteristic == characteristic) {
-                    action.callback?.invoke(action, characteristic.value)
-                    currentAction = null
+                if (action.type == BluetoothActionType.Read && action.characteristic == characteristic) {
+                    processNextAction(characteristic.value)
                 } else {
                     Log.w(tag, "Read occurred for incorrect action")
                 }
             }
-            processNextAction();
         }
 
         @RequiresPermission(BLUETOOTH_CONNECT)
@@ -682,19 +684,18 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                 lastCharacteristicWrite.value = characteristic!!.value;
                 if (currentAction != null) {
                     val action = currentAction!!
-                    if (action.characteristic == characteristic) {
+                    if ((action.type == BluetoothActionType.Write || action.type == BluetoothActionType.WriteRead )
+                        && action.characteristic == characteristic) {
                         if (action.type == BluetoothActionType.WriteRead) {
-                            changeListeners.add(action)
+                            // Don't process next action until there is a change response or timeout
                         } else {
-                            action.callback?.invoke(action, characteristic!!.value)
+                            processNextAction(characteristic!!.value);
                         }
-                        currentAction = null
                     } else {
                         Log.w(tag, "Write occurred for incorrect action")
                     }
                 }
             }
-            processNextAction();
         }
 
         @RequiresPermission(BLUETOOTH_CONNECT)
@@ -721,7 +722,7 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                                 43 -> {
                                     queueAction(
                                         BluetoothAction(
-                                            BluetoothActionType.Write,
+                                            BluetoothActionType.WriteRead,
                                             characteristic = characteristic,
                                             value = SolarChargerCommands.CHART_DATA,
                                         )
@@ -731,7 +732,7 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                                 15 -> {
                                     queueAction(
                                         BluetoothAction(
-                                            BluetoothActionType.Write,
+                                            BluetoothActionType.WriteRead,
                                             characteristic = characteristic,
                                             value = SolarChargerCommands.HOME_DATA,
                                         )
@@ -749,18 +750,14 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                 }
             }
 
-            val readers = changeListeners.filter{
-                it.characteristic == characteristic
-                        && (it.type == BluetoothActionType.WriteRead || it.type == BluetoothActionType.Change)
-            }
-            for (action in readers) {
-                try {
-                    action.callback?.invoke(action, characteristic.value)
-                } catch (e: Exception) {
-                    Log.e(tag, "Error processing callback: ${e}")
+            if (currentAction != null) {
+                var action = currentAction!!;
+                if (action.type == BluetoothActionType.WriteRead && action.characteristic == characteristic) {
+                    processNextAction(characteristic.value);
+                } else {
+                    Log.w(tag, "Change occurred for incorrect action")
                 }
             }
-            changeListeners.removeAll(readers)
         }
 
 

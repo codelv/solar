@@ -81,6 +81,7 @@ data class UserPreferences(
 
 data class ModelChangeAction(
     val clearRecordedData: Boolean = false,
+    val clearChargerHistory: Boolean = false,
     val recordedData: Array<VoltageCurrent>? = null,
     val historyRecords: Array<BatteryMonitorHistoryRecord>? = null,
     val chargerHistory: ChargerHistory? = null,
@@ -150,6 +151,7 @@ class AppViewModel : ViewModel() {
     var batteryRecordedData = mutableStateListOf<VoltageCurrent>()
     var batteryRecordMinutes = mutableStateOf(0)
     var batteryHistoryRecords = mutableStateListOf<BatteryMonitorHistoryRecord>()
+    var batteryHistoryNumberOfDays = mutableStateOf(7)
 
     var chargerHistoryData = mutableStateMapOf<Int, ChargerHistory>()
 
@@ -174,19 +176,23 @@ class AppViewModel : ViewModel() {
                 if (action != null) {
                     if (action.clearRecordedData) {
                         batteryRecordedData.clear()
-                    } else if (action.recordedData != null) {
+                    }
+                    if (action.clearChargerHistory) {
+                        chargerHistoryData.clear()
+                    }
+                    if (action.recordedData != null) {
                         batteryRecordedData.addAll(action.recordedData!!)
                         Log.w(TAG, "Updated recorded data ${batteryRecordedData.size}!")
-                    } else if (action.historyRecords != null) {
+                    }
+                    if (action.historyRecords != null) {
                         batteryHistoryRecords.clear()
                         batteryHistoryRecords.addAll(action.historyRecords!!)
                         Log.w(TAG, "Updated history records  ${batteryHistoryRecords.size}!")
-                    } else if (action.chargerHistory  != null) {
+                    }
+                    if (action.chargerHistory  != null) {
                         val entry = action.chargerHistory!!
                         chargerHistoryData.put(entry.index, entry)
                         Log.w(TAG, "Updated charger history  ${chargerHistoryData.size}!")
-                    } else {
-                        Log.w(TAG, "Model sync action with no effect!")
                     }
                 }
             }

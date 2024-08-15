@@ -1,0 +1,13 @@
+Solar is an app to monitor off grid solar setups over bluetooth.
+
+It supports simultaneous monitoring of the battery and solar charger. When both devices are connected it can calculate the inverter power. 
+
+Unlike the OEM app it does not require fine location access and does not have internet permission.
+
+Currently only the Junctek KH-F battery monitor (KH110F/KH140F/KH160F) and Ruijing 60A MPPT solar charger (sold under various brands like LiTime, HQST, etc.) are supported.
+
+Features:
+- Real time voltage, current, power, and energy readings
+- Live plotting of power readings of the charger, battery, and inverter
+- Reading history from the solar charger
+
