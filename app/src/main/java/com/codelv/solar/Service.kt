@@ -164,6 +164,7 @@ enum class BatteryMonitorDataType(val code: Int) {
     RemainingAh(0xd2),
     TotalDischargeEnergy(0xd3),
     TotalChargeEnergy(0xd4),
+
     // Appears to be max of 999999
     RecordProgressInMinutes(0xd5),
     RemainingTimeInMinutes(0xd6),
@@ -205,13 +206,28 @@ class BatteryMonitorCommands {
         // will be 0xA0, 0xA1, or 0xA2.
         fun loadRecording(size: Int, index: Int): List<ByteArray> {
             return listOf(
-                byteArrayOf(0xBB.toByte(), size.toByte(), 0xB9.toByte(), 0x0C.toByte(), 0xEE.toByte()),
-                byteArrayOf(0xBB.toByte(), index.toByte(), 0xB8.toByte(), 0x0C.toByte(), 0xEE.toByte())
+                byteArrayOf(
+                    0xBB.toByte(),
+                    size.toByte(),
+                    0xB9.toByte(),
+                    0x0C.toByte(),
+                    0xEE.toByte()
+                ),
+                byteArrayOf(
+                    0xBB.toByte(),
+                    index.toByte(),
+                    0xB8.toByte(),
+                    0x0C.toByte(),
+                    0xEE.toByte()
+                )
             )
         }
+
         // bb9aa90cee
-        val HOME_DATA = byteArrayOf(0xBB.toByte(), 0x9A.toByte(), 0xA9.toByte(), 0x0C.toByte(), 0xEE.toByte())
-        val RECORD_HISTORY = byteArrayOf(0xBB.toByte(), 0x31.toByte(), 0xf4.toByte(), 0x0C.toByte(), 0xEE.toByte())
+        val HOME_DATA =
+            byteArrayOf(0xBB.toByte(), 0x9A.toByte(), 0xA9.toByte(), 0x0C.toByte(), 0xEE.toByte())
+        val RECORD_HISTORY =
+            byteArrayOf(0xBB.toByte(), 0x31.toByte(), 0xf4.toByte(), 0x0C.toByte(), 0xEE.toByte())
         val LAN_ON = byteArrayOf(0x9A.toByte(), 0xF1.toByte(), 0x01.toByte(), 0xF1.toByte())
         val LAN_OFF = byteArrayOf(0x9A.toByte(), 0xF1.toByte(), 0x00.toByte(), 0xF1.toByte())
         val CLEAR_DATA = byteArrayOf(0x00.toByte(), 0xf8.toByte(), 0x9a.toByte(), 0xf8.toByte())
@@ -233,6 +249,7 @@ class SolarChargerCommands {
             val low = v and 0xFF
             return byteArrayOf(low.toByte(), high.toByte())
         }
+
         // Load history of day today-now
         fun loadHistory(days: Int): ByteArray {
             var cmd = byteArrayOf(0x01.toByte(), 0x03.toByte(), 0x04.toByte())
@@ -242,7 +259,9 @@ class SolarChargerCommands {
             cmd += crc(cmd)
             return cmd
         }
+
         val HOME_DATA = byteArrayOf(0x01, 0x03, 0x01, 0x01, 0x00, 0x13, 0x54, 0x3B)
+
         // This is the same as loadHistory(0)
         val CHART_DATA =
             byteArrayOf(0x01, 0x03, 0x04, 0x00, 0x00, 0x05, 0x84.toByte(), 0xF9.toByte())
@@ -321,6 +340,7 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
         }
         return true
     }
+
     @RequiresPermission(BLUETOOTH_CONNECT)
     fun writeCommand(
         value: ByteArray,
@@ -332,21 +352,35 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
             var characteristic: BluetoothGattCharacteristic? = null
             when (deviceType.value) {
                 DeviceType.BatteryMonitor -> {
-                    val service = bluetoothGatt!!.getService(UUID.fromString(
-                        BATTERY_MONITOR_DATA_SERVICE_UUID))
+                    val service = bluetoothGatt!!.getService(
+                        UUID.fromString(
+                            BATTERY_MONITOR_DATA_SERVICE_UUID
+                        )
+                    )
                     if (service != null) {
-                        characteristic = service.getCharacteristic(UUID.fromString(
-                            BATTERY_MONITOR_CONF_CHARACTERISTIC_UUID))
+                        characteristic = service.getCharacteristic(
+                            UUID.fromString(
+                                BATTERY_MONITOR_CONF_CHARACTERISTIC_UUID
+                            )
+                        )
                     }
                 }
+
                 DeviceType.SolarCharger -> {
-                    val service = bluetoothGatt!!.getService(UUID.fromString(
-                        SOLAR_CHARGER_DATA_SERVICE_UUID))
+                    val service = bluetoothGatt!!.getService(
+                        UUID.fromString(
+                            SOLAR_CHARGER_DATA_SERVICE_UUID
+                        )
+                    )
                     if (service != null) {
-                        characteristic = service.getCharacteristic(UUID.fromString(
-                            SOLAR_CHARGER_DATA_CHARACTERISTIC_UUID))
+                        characteristic = service.getCharacteristic(
+                            UUID.fromString(
+                                SOLAR_CHARGER_DATA_CHARACTERISTIC_UUID
+                            )
+                        )
                     }
                 }
+
                 else -> {}
             }
             if (characteristic != null) {
@@ -419,7 +453,8 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
             try {
                 Log.d(tag, "Invoking action callback")
                 action.callback?.invoke(action!!, value)
-                action.status = if (aborted) BluetoothActionStatus.Aborted else BluetoothActionStatus.Complete
+                action.status =
+                    if (aborted) BluetoothActionStatus.Aborted else BluetoothActionStatus.Complete
             } catch (e: Exception) {
                 Log.e(tag, "Callback exception: ${e}")
             }
@@ -442,6 +477,7 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                     BluetoothActionType.Read -> {
                         bluetoothGatt?.readCharacteristic(characteristic)
                     }
+
                     BluetoothActionType.Write,
                     BluetoothActionType.WriteRead -> {
                         characteristic.setValue(action.value!!)
@@ -451,14 +487,16 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                         )
                         bluetoothGatt?.writeCharacteristic(characteristic)
                     }
+
                     else -> {}
                 }
             } else if (action.descriptor != null) {
                 val desc = action.descriptor!!
                 when (action.type) {
-                    BluetoothActionType.Read  -> {
+                    BluetoothActionType.Read -> {
                         bluetoothGatt?.readDescriptor(desc)
                     }
+
                     BluetoothActionType.Write,
                     BluetoothActionType.WriteRead -> {
                         desc.setValue(action.value!!)
@@ -468,6 +506,7 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                         )
                         bluetoothGatt?.writeDescriptor(desc)
                     }
+
                     else -> {}
                 }
             } else {
@@ -499,8 +538,9 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                 Log.w(tag, "Sync task stopped")
                 return // Stop task on disconnect
             }
-            val dt = Date().toInstant().toEpochMilli() - lastUpdated.value.toInstant().toEpochMilli();
-            if (dt > 3*POLL_PERIOD) {
+            val dt =
+                Date().toInstant().toEpochMilli() - lastUpdated.value.toInstant().toEpochMilli();
+            if (dt > 3 * POLL_PERIOD) {
                 Log.w(tag, "Out of sync by ${dt}ms. Flushing all pending actions")
                 lastUpdated.value = Date() // Don't try again on next poll
                 pendingActions.clear();
@@ -609,8 +649,11 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                             )
                         }
                         gatt.setCharacteristicNotification(c, true)
-                        service.broadcastUpdate(device, MonitorService.ACTION_BATTERY_MONITOR_CONNECTED)
-                        handler.postDelayed({sync()}, POLL_PERIOD/2)
+                        service.broadcastUpdate(
+                            device,
+                            MonitorService.ACTION_BATTERY_MONITOR_CONNECTED
+                        )
+                        handler.postDelayed({ sync() }, POLL_PERIOD / 2)
                         handler.postDelayed(syncTask, POLL_PERIOD)
 
                     }
@@ -638,8 +681,11 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                             )
                         }
                         gatt.setCharacteristicNotification(c, true)
-                        service.broadcastUpdate(device, MonitorService.ACTION_SOLAR_CHARGER_CONNECTED)
-                        handler.postDelayed({sync()}, POLL_PERIOD/2)
+                        service.broadcastUpdate(
+                            device,
+                            MonitorService.ACTION_SOLAR_CHARGER_CONNECTED
+                        )
+                        handler.postDelayed({ sync() }, POLL_PERIOD / 2)
                         handler.postDelayed(syncTask, POLL_PERIOD)
                     }
                 }
@@ -684,8 +730,9 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                 lastCharacteristicWrite.value = characteristic!!.value;
                 if (currentAction != null) {
                     val action = currentAction!!
-                    if ((action.type == BluetoothActionType.Write || action.type == BluetoothActionType.WriteRead )
-                        && action.characteristic == characteristic) {
+                    if ((action.type == BluetoothActionType.Write || action.type == BluetoothActionType.WriteRead)
+                        && action.characteristic == characteristic
+                    ) {
                         if (action.type == BluetoothActionType.WriteRead) {
                             // Don't process next action until there is a change response or timeout
                         } else {
@@ -741,7 +788,7 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
 
                                 else -> {}
                             }
-                        }, POLL_PERIOD/2)
+                        }, POLL_PERIOD / 2)
                     }
                 }
 
@@ -768,7 +815,9 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
         // LiTime solar charger
         // Home data is 43 bytes
         // 0103260064010803e701072119000000000000023603af025c000000020000006300056a7200000000ad9a
-        if (data.size == 43 && data.sliceArray(0..2).contentEquals(byteArrayOf(0x01, 0x03, 0x26))) { // && lastCharacteristicWrite.contentEquals(SolarChargerCommands.HOME_DATA)) {
+        if (data.size == 43 && data.sliceArray(0..2)
+                .contentEquals(byteArrayOf(0x01, 0x03, 0x26))
+        ) { // && lastCharacteristicWrite.contentEquals(SolarChargerCommands.HOME_DATA)) {
             sendUpdate(
                 SolarChargerDataType.ChargeVoltage,
                 data.sliceArray(5..6).toHexString().toInt(16).toDouble() / 10
@@ -801,13 +850,17 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
             )
             lastUpdated.value = Date()
             return true
-        } else if (data.size == 15 && data.sliceArray(0..2).contentEquals(byteArrayOf(0x01, 0x03, 0x0a))) {
+        } else if (data.size == 15 && data.sliceArray(0..2)
+                .contentEquals(byteArrayOf(0x01, 0x03, 0x0a))
+        ) {
             // 01,03,0a,19,89,00,00,05,32,01,0f,01,00,f7,64
-            if (lastCharacteristicWrite.value.size == 8 && lastCharacteristicWrite.value.toHexString().startsWith("010304")) {
+            if (lastCharacteristicWrite.value.size == 8 && lastCharacteristicWrite.value.toHexString()
+                    .startsWith("010304")
+            ) {
                 val entry = ChargerHistory(
                     index = lastCharacteristicWrite.value[3].toUByte().toInt(),
                     totalEnergy = data.sliceArray(3..4).toHexString().toInt(16).toDouble(),
-                    loadEnergy =  data.sliceArray(5..6).toHexString().toInt(16).toDouble(),
+                    loadEnergy = data.sliceArray(5..6).toHexString().toInt(16).toDouble(),
                     peakPower = data.sliceArray(7..8).toHexString().toInt(16).toDouble(),
                     maxVoltage = data.sliceArray(9..10).toHexString().toInt(16).toDouble() / 10,
                     minVoltage = data.sliceArray(11..12).toHexString().toInt(16).toDouble() / 10
@@ -919,7 +972,7 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                         BatteryMonitorDataType.Current,
                         BatteryMonitorDataType.Power,
                         BatteryMonitorDataType.TotalChargeEnergy,
-                        BatteryMonitorDataType.TotalDischargeEnergy-> {
+                        BatteryMonitorDataType.TotalDischargeEnergy -> {
                             if (entry.size > 0) {
                                 intent.putExtra(
                                     BATTERY_MONITOR_DATA_VALUE,
@@ -963,6 +1016,7 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                                 )
                             }
                         }
+
                         BatteryMonitorDataType.RecordedDataStartTime -> {
                             if (entry.size == 3) {
                                 val h = entry[0].toHexString().toInt()
@@ -981,7 +1035,7 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
 
                         BatteryMonitorDataType.RecordedDataStartDate -> {
                             if (entry.size == 3) {
-                                val y = 2000+entry[0].toHexString().toInt()
+                                val y = 2000 + entry[0].toHexString().toInt()
                                 val m = entry[1].toHexString().toInt()
                                 val d = entry[2].toHexString().toInt()
                                 try {
@@ -997,36 +1051,41 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                         }
                         // Do not send broadcast for each of these
                         BatteryMonitorDataType.RecordedVoltage -> {
-                            if (entry.size > 0 ) {
+                            if (entry.size > 0) {
                                 lastVoltage = entry.toHexString().toDouble() / 100
                             }
                         }
+
                         BatteryMonitorDataType.RecordedDischargeCurrent,
                         BatteryMonitorDataType.RecordedChargeCurrent -> {
-                            if (entry.size > 0 ) {
-                                val sign = if (type == BatteryMonitorDataType.RecordedDischargeCurrent) -1 else 1
-                                history.add(VoltageCurrent(
-                                    lastVoltage,
-                                    sign * entry.toHexString().toDouble() / 100
-                                ))
+                            if (entry.size > 0) {
+                                val sign =
+                                    if (type == BatteryMonitorDataType.RecordedDischargeCurrent) -1 else 1
+                                history.add(
+                                    VoltageCurrent(
+                                        lastVoltage,
+                                        sign * entry.toHexString().toDouble() / 100
+                                    )
+                                )
                             }
                         }
+
                         BatteryMonitorDataType.RecordedDataIndex -> {
-                            if (entry.size == 10 ) {
+                            if (entry.size == 10) {
                                 try {
                                     val record = BatteryMonitorHistoryRecord(
-                                        date=Date(
-                                            2000+entry[0].toHexString().toInt(),
+                                        date = Date(
+                                            2000 + entry[0].toHexString().toInt(),
                                             entry[1].toHexString().toInt(),
                                             entry[2].toHexString().toInt(),
                                             entry[3].toHexString().toInt(),
                                             entry[4].toHexString().toInt(),
                                             entry[5].toHexString().toInt(),
                                         ),
-                                        size=entry.sliceArray(6..9).toHexString().toInt()
+                                        size = entry.sliceArray(6..9).toHexString().toInt()
                                     )
                                     // Keep unique
-                                    if (records.find{it.date == record.date || it.size == record.size} == null) {
+                                    if (records.find { it.date == record.date || it.size == record.size } == null) {
                                         records.add(record)
                                     }
                                 } catch (e: Exception) {
@@ -1035,6 +1094,7 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
 
                             }
                         }
+
                         else -> {
                             if (entry.size > 0) {
                                 intent.putExtra(BATTERY_MONITOR_DATA_VALUE, entry)
@@ -1061,8 +1121,7 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                     )
                     intent.putExtra(BATTERY_MONITOR_DATA_VALUE, history.toTypedArray())
                     service.sendBroadcast(intent)
-                }
-                else if (records.size > 0) {
+                } else if (records.size > 0) {
                     val intent = Intent(ACTION_BATTERY_MONITOR_DATA_AVAILABLE)
                     intent.putExtra(
                         BATTERY_MONITOR_DATA_TYPE,
@@ -1150,7 +1209,11 @@ class MonitorService : Service() {
     }
 
     @RequiresPermission(BLUETOOTH_CONNECT)
-    fun broadcastUpdate(device: BluetoothDevice, action: String, characteristic: BluetoothGattCharacteristic? = null) {
+    fun broadcastUpdate(
+        device: BluetoothDevice,
+        action: String,
+        characteristic: BluetoothGattCharacteristic? = null
+    ) {
         val intent = Intent(action)
         intent.putExtra(BluetoothDevice.EXTRA_DEVICE, device)
         if (characteristic != null) {

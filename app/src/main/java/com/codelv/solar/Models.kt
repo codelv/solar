@@ -54,7 +54,7 @@ data class UserPreferences(
                     } else {
                         throw exception
                     }
-                }.map {  state ->
+                }.map { state ->
                     UserPreferences(
                         batteryMonitorAddress = state[stringPreferencesKey(UserPreferences::batteryMonitorAddress.name)],
                         solarChargerAddress = state[stringPreferencesKey(UserPreferences::solarChargerAddress.name)]
@@ -86,7 +86,7 @@ data class ModelChangeAction(
     val historyRecords: Array<BatteryMonitorHistoryRecord>? = null,
     val chargerHistory: ChargerHistory? = null,
 
-)
+    )
 
 class AppViewModel : ViewModel() {
     var prefs = UserPreferences()
@@ -147,7 +147,7 @@ class AppViewModel : ViewModel() {
     // RecordedData cannot be updated without a lock
     // not sure how to do that from the broadcast receiver
     var pendingChanges = ConcurrentLinkedQueue<ModelChangeAction>()
-        var lastBatteryRecordStartTime: MutableState<Date?> = mutableStateOf(null)
+    var lastBatteryRecordStartTime: MutableState<Date?> = mutableStateOf(null)
     var batteryRecordedData = mutableStateListOf<VoltageCurrent>()
     var batteryRecordMinutes = mutableStateOf(0)
     var batteryHistoryRecords = mutableStateListOf<BatteryMonitorHistoryRecord>()
@@ -189,7 +189,7 @@ class AppViewModel : ViewModel() {
                         batteryHistoryRecords.addAll(action.historyRecords!!)
                         Log.w(TAG, "Updated history records  ${batteryHistoryRecords.size}!")
                     }
-                    if (action.chargerHistory  != null) {
+                    if (action.chargerHistory != null) {
                         val entry = action.chargerHistory!!
                         chargerHistoryData.put(entry.index, entry)
                         Log.w(TAG, "Updated charger history  ${chargerHistoryData.size}!")
@@ -221,6 +221,7 @@ class AppViewModel : ViewModel() {
 //            history.removeAt(0)
 //        }
     }
+
     suspend fun load(dataStore: DataStore<Preferences>) {
         Log.d("State", "loading preferences")
         prefs = UserPreferences.load(dataStore)

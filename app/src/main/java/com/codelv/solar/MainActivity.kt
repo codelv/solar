@@ -41,8 +41,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -56,6 +54,8 @@ import androidx.compose.material.icons.outlined.LineAxis
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -77,7 +77,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import com.patrykandpatrick.vico.core.common.shape.Shape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -116,12 +115,12 @@ import com.patrykandpatrick.vico.compose.common.of
 import com.patrykandpatrick.vico.core.cartesian.AutoScrollCondition
 import com.patrykandpatrick.vico.core.cartesian.Scroll
 import com.patrykandpatrick.vico.core.cartesian.Zoom
-import com.patrykandpatrick.vico.core.cartesian.axis.AxisPosition
 import com.patrykandpatrick.vico.core.cartesian.axis.VerticalAxis
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianValueFormatter
 import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
 import com.patrykandpatrick.vico.core.cartesian.layer.LineCartesianLayer
 import com.patrykandpatrick.vico.core.common.Dimensions
+import com.patrykandpatrick.vico.core.common.shape.Shape
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -132,7 +131,6 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Date
 import kotlin.math.max
-import kotlin.math.roundToLong
 
 const val SNAPSHOT_PERIOD: Long = 1000
 
@@ -174,18 +172,23 @@ class MainActivity : ComponentActivity() {
                             state.solarVoltage.value =
                                 intent.getDoubleExtra(MonitorService.SOLAR_CHARGER_DATA_VALUE, 0.0)
                         }
+
                         SolarChargerDataType.HistoryData -> {
-                            var data: ChargerHistory = intent.getParcelableExtra(MonitorService.SOLAR_CHARGER_DATA_VALUE)!!
+                            var data: ChargerHistory =
+                                intent.getParcelableExtra(MonitorService.SOLAR_CHARGER_DATA_VALUE)!!
                             if (data.index == 0) {
                                 state.chargerMinVoltage.value = data.minVoltage
                                 state.chargerMaxVoltage.value = data.maxVoltage
                                 state.chargerTodayEnergy.value = data.totalEnergy
                                 state.solarPeakPower.value = data.peakPower
                             }
-                            state.pendingChanges.add(ModelChangeAction(
-                                chargerHistory=data,
-                            ))
+                            state.pendingChanges.add(
+                                ModelChangeAction(
+                                    chargerHistory = data,
+                                )
+                            )
                         }
+
                         SolarChargerDataType.TodayMinBatteryVoltage -> {
                             state.chargerMinVoltage.value =
                                 intent.getDoubleExtra(MonitorService.SOLAR_CHARGER_DATA_VALUE, 0.0)
@@ -225,6 +228,7 @@ class MainActivity : ComponentActivity() {
                             state.chargerTemp.value =
                                 intent.getIntExtra(MonitorService.SOLAR_CHARGER_DATA_VALUE, 0)
                         }
+
                         else -> {}
                     }
                 }
@@ -296,11 +300,13 @@ class MainActivity : ComponentActivity() {
                                 MonitorService.BATTERY_MONITOR_DATA_VALUE, 0
                             )
                         }
+
                         BatteryMonitorDataType.RecordedDataStartDate -> {
                             state.lastBatteryRecordStartTime.value = intent.getParcelableExtra(
                                 MonitorService.BATTERY_MONITOR_DATA_VALUE,
                             )
                         }
+
                         BatteryMonitorDataType.RecordedDataStartTime -> {
                             if (state.lastBatteryRecordStartTime.value != null) {
                                 val date = state.lastBatteryRecordStartTime.value!!
@@ -318,39 +324,51 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
                         }
+
                         BatteryMonitorDataType.RecordedData -> {
                             val data: Array<VoltageCurrent>? = intent.getParcelableArrayExtra(
                                 MonitorService.BATTERY_MONITOR_DATA_VALUE,
                                 VoltageCurrent::class.java
                             )
-                            state.pendingChanges.add(ModelChangeAction(
-                                recordedData=data
-                            ))
+                            state.pendingChanges.add(
+                                ModelChangeAction(
+                                    recordedData = data
+                                )
+                            )
                         }
+
                         BatteryMonitorDataType.RecordedDataIndex -> {
-                            val records: Array<BatteryMonitorHistoryRecord> = intent.getParcelableArrayExtra(
-                                MonitorService.BATTERY_MONITOR_DATA_VALUE,
-                                BatteryMonitorHistoryRecord::class.java
-                            )!!
-                            state.pendingChanges.add(ModelChangeAction(
-                                historyRecords = records
-                            ))
+                            val records: Array<BatteryMonitorHistoryRecord> =
+                                intent.getParcelableArrayExtra(
+                                    MonitorService.BATTERY_MONITOR_DATA_VALUE,
+                                    BatteryMonitorHistoryRecord::class.java
+                                )!!
+                            state.pendingChanges.add(
+                                ModelChangeAction(
+                                    historyRecords = records
+                                )
+                            )
                         }
 
                         else -> {
                         }
                     }
                 }
+
                 MonitorService.ACTION_BATTERY_MONITOR_CONNECTED -> {
-                    val device: BluetoothDevice = intent?.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)!!
+                    val device: BluetoothDevice =
+                        intent?.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)!!
                     state.prefs.batteryMonitorAddress = device.address
                     state.unsaved.value = true
                 }
+
                 MonitorService.ACTION_SOLAR_CHARGER_CONNECTED -> {
-                    val device: BluetoothDevice = intent?.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)!!
+                    val device: BluetoothDevice =
+                        intent?.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)!!
                     state.prefs.solarChargerAddress = device.address
                     state.unsaved.value = true
                 }
+
                 else -> {}
             }
         }
@@ -399,14 +417,12 @@ inline fun <reified Activity : ComponentActivity> Context.getActivity(): Activit
 }
 
 
-
-
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun MainView(state: AppViewModel) {
     val context = LocalContext.current
     val activity = context.getActivity<MainActivity>()!!
-    LaunchedEffect(Unit){
+    LaunchedEffect(Unit) {
         withContext(Dispatchers.Default) {
             state.load(activity.dataStore)
             while (true) {
@@ -635,8 +651,14 @@ fun BluetoothDevicesScreen(nav: NavHostController, state: AppViewModel) {
                 if (!state.availableDevices.contains(device)) {
                     state.availableDevices.add(device)
                 }
-                val lastBatteryMonitor = if (state.prefs.batteryMonitorAddress != null) activity.bluetoothAdapter.getRemoteDevice(state.prefs.batteryMonitorAddress) else null
-                val lastSolarCharger = if (state.prefs.solarChargerAddress != null ) activity.bluetoothAdapter.getRemoteDevice(state.prefs.solarChargerAddress) else null
+                val lastBatteryMonitor =
+                    if (state.prefs.batteryMonitorAddress != null) activity.bluetoothAdapter.getRemoteDevice(
+                        state.prefs.batteryMonitorAddress
+                    ) else null
+                val lastSolarCharger =
+                    if (state.prefs.solarChargerAddress != null) activity.bluetoothAdapter.getRemoteDevice(
+                        state.prefs.solarChargerAddress
+                    ) else null
                 if (!state.connectedDevices.contains(device) && (device == lastBatteryMonitor || device == lastSolarCharger)) {
                     state.connectedDevices.add(device)
                     activity.monitorService?.connect(device)
@@ -664,7 +686,7 @@ fun BluetoothDevicesScreen(nav: NavHostController, state: AppViewModel) {
             if (state.availableDevices.size == 0) {
                 Text("No devices found... ")
             }
-            FilledTonalButton(onClick = { scanning = true }, modifier=Modifier.fillMaxWidth()) {
+            FilledTonalButton(onClick = { scanning = true }, modifier = Modifier.fillMaxWidth()) {
                 Text("Start scanning", modifier = Modifier.padding(4.dp))
             }
         }
@@ -693,10 +715,18 @@ fun BluetoothDevicesScreen(nav: NavHostController, state: AppViewModel) {
                 if (state.connectedDevices.contains(device)) {
                     val conn = activity.monitorService?.connections?.find { it.device == device }
                     if (conn?.connectionState?.value == STATE_CONNECTED) {
-                        Icon(imageVector = Icons.Filled.BluetoothConnected, contentDescription =null, tint = Color.Green )
+                        Icon(
+                            imageVector = Icons.Filled.BluetoothConnected,
+                            contentDescription = null,
+                            tint = Color.Green
+                        )
                         Text("Connected", style = Typography.labelSmall)
                     } else {
-                        Icon(imageVector = Icons.Filled.BluetoothSearching, contentDescription =null, tint = Color.DarkGray )
+                        Icon(
+                            imageVector = Icons.Filled.BluetoothSearching,
+                            contentDescription = null,
+                            tint = Color.DarkGray
+                        )
                         Text("Connecting...", style = Typography.labelSmall)
                         CircularProgressIndicator()
                     }
@@ -745,7 +775,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
             refreshing = false
         }, 5000)
         var n = activity.monitorService!!.connections.size;
-        activity.monitorService?.sync{ action, value ->
+        activity.monitorService?.sync { action, value ->
             n -= 1;
             refreshing = n > 0
         }
@@ -817,9 +847,9 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                         fontWeight = FontWeight.Light
                     )
                     if (activity.monitorService?.connections?.find { it.deviceType.value == DeviceType.SolarCharger && it.connectionState.value == STATE_CONNECTED } != null) {
-                        Icon(Icons.Filled.BluetoothConnected, null, tint=Color.Green)
+                        Icon(Icons.Filled.BluetoothConnected, null, tint = Color.Green)
                     } else {
-                        Icon(Icons.Filled.BluetoothDisabled, null, tint=Color.Red)
+                        Icon(Icons.Filled.BluetoothDisabled, null, tint = Color.Red)
                     }
                 }
                 Row(
@@ -838,7 +868,11 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                             style = Typography.headlineSmall
                         )
                         Text(
-                            text = "Min ${"%.2f".format(state.chargerMinVoltage.value)}V Max ${"%.2f".format(state.chargerMaxVoltage.value)}V",
+                            text = "Min ${"%.2f".format(state.chargerMinVoltage.value)}V Max ${
+                                "%.2f".format(
+                                    state.chargerMaxVoltage.value
+                                )
+                            }V",
                             style = Typography.bodySmall
 
                         )
@@ -861,7 +895,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                         )
                         Text("Total energy output", style = Typography.labelSmall)
                         Text(
-                            text = "${"%.3f".format(state.chargerTotalChargeEnergy.value/1000)}kWh",
+                            text = "${"%.3f".format(state.chargerTotalChargeEnergy.value / 1000)}kWh",
                             style = Typography.bodyLarge
                         )
                         Text("Temperature", style = Typography.labelSmall)
@@ -907,21 +941,22 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                             style = Typography.headlineSmall
                         )
                     }
-                   Column(
+                    Column(
                         Modifier
                             .padding(8.dp)
                             .fillMaxWidth()
                             .weight(2f)
                     ) {
-                       Text("Time remaining", style = Typography.labelSmall)
+                        Text("Time remaining", style = Typography.labelSmall)
 
-                       var text = "N/A"
-                       if (state.inverterCurrent.value > 0 && state.batteryRemainingAh.value > 0) {
-                           var remainingTime = (60*state.batteryRemainingAh.value / state.inverterCurrent.value).toInt()
-                           val hours = remainingTime / 60
-                           val minutes = remainingTime % 60
-                           text = "${hours}h ${minutes}min"
-                       }
+                        var text = "N/A"
+                        if (state.inverterCurrent.value > 0 && state.batteryRemainingAh.value > 0) {
+                            var remainingTime =
+                                (60 * state.batteryRemainingAh.value / state.inverterCurrent.value).toInt()
+                            val hours = remainingTime / 60
+                            val minutes = remainingTime % 60
+                            text = "${hours}h ${minutes}min"
+                        }
                         Text(
                             text = text,
                             style = Typography.displaySmall
@@ -950,9 +985,9 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                         fontWeight = FontWeight.Light
                     )
                     if (activity.monitorService?.connections?.find { it.deviceType.value == DeviceType.BatteryMonitor && it.connectionState.value == STATE_CONNECTED } != null) {
-                        Icon(Icons.Filled.BluetoothConnected, null, tint=Color.Green)
+                        Icon(Icons.Filled.BluetoothConnected, null, tint = Color.Green)
                     } else {
-                        Icon(Icons.Filled.BluetoothDisabled, null, tint=Color.Red)
+                        Icon(Icons.Filled.BluetoothDisabled, null, tint = Color.Red)
                     }
                     Text(
                         if (state.batteryCharging.value) "Charging" else "Discharging",
@@ -1048,7 +1083,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                     ) {
                         Text("Total charge energy", style = Typography.labelSmall)
                         Text(
-                            text = "${"%.3f".format(state.batteryTotalChargeEnergy.value/1000)}kWh",
+                            text = "${"%.3f".format(state.batteryTotalChargeEnergy.value / 1000)}kWh",
                             style = Typography.headlineSmall
                         )
                     }
@@ -1060,7 +1095,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                     ) {
                         Text("Total discharge energy", style = Typography.labelSmall)
                         Text(
-                            text = "${"%.3f".format(state.batteryTotalDischargeEnergy.value/1000)}kWh",
+                            text = "${"%.3f".format(state.batteryTotalDischargeEnergy.value / 1000)}kWh",
                             style = Typography.headlineSmall
                         )
                     }
@@ -1087,15 +1122,16 @@ val voltageLegend = listOf(
     "Charger",
     "Battery"
 )
+
 fun secondsToStr(seconds: Int): String {
     if (seconds < 60) {
         return "${seconds} sec"
     }
-    val mins = seconds/60;
-    if (seconds < 60*60) {
+    val mins = seconds / 60;
+    if (seconds < 60 * 60) {
         return "${mins} min${if (mins == 1) "" else "s"}"
     }
-    val hrs = mins/60;
+    val hrs = mins / 60;
     return "${hrs} hour${if (hrs == 1) "" else "s"}"
 }
 
@@ -1106,9 +1142,9 @@ fun ChartsScreen(nav: NavHostController, state: AppViewModel) {
     val inverterPowerModelProducer = remember { state.inverterPowerModelProducer }
     val currentsModelProducer = remember { state.currentsModelProducer }
     val voltagesModelProducer = remember { state.voltagesModelProducer }
-    var zoom by remember {mutableStateOf(state.chartXStep.value * 6) }
+    var zoom by remember { mutableStateOf(state.chartXStep.value * 6) }
 
-    LaunchedEffect(Unit){//state.lastUpdate.value) {
+    LaunchedEffect(Unit) {//state.lastUpdate.value) {
         Log.d(TAG, "New launch")
         withContext(Dispatchers.Default) {
             while (true) {
@@ -1194,7 +1230,15 @@ fun ChartsScreen(nav: NavHostController, state: AppViewModel) {
                 rememberLineCartesianLayer(
                     LineCartesianLayer.LineProvider.series(
                         rememberLine(
-                            fill = remember { LineCartesianLayer.LineFill.single(fill(Color(0xffffc983))) },
+                            fill = remember {
+                                LineCartesianLayer.LineFill.single(
+                                    fill(
+                                        Color(
+                                            0xffffc983
+                                        )
+                                    )
+                                )
+                            },
                         )
                     )
                 ),
@@ -1202,11 +1246,11 @@ fun ChartsScreen(nav: NavHostController, state: AppViewModel) {
                 startAxis = rememberStartAxis(
                     horizontalLabelPosition = VerticalAxis.HorizontalLabelPosition.Inside,
                     titleComponent = rememberTextComponent(),
-                    title="Power (Watts)"
+                    title = "Power (Watts)"
                 ),
                 bottomAxis = rememberBottomAxis(
                     guideline = null,
-                    title="Time (Seconds)",
+                    title = "Time (Seconds)",
                     titleComponent = rememberTextComponent(),
                 ),
             ),
@@ -1232,7 +1276,15 @@ fun ChartsScreen(nav: NavHostController, state: AppViewModel) {
                 rememberLineCartesianLayer(
                     LineCartesianLayer.LineProvider.series(
                         rememberLine(
-                            fill = remember { LineCartesianLayer.LineFill.single(fill(Color(0xfff283ff))) },
+                            fill = remember {
+                                LineCartesianLayer.LineFill.single(
+                                    fill(
+                                        Color(
+                                            0xfff283ff
+                                        )
+                                    )
+                                )
+                            },
                         )
                     )
                 ),
@@ -1240,11 +1292,11 @@ fun ChartsScreen(nav: NavHostController, state: AppViewModel) {
                 startAxis = rememberStartAxis(
                     horizontalLabelPosition = VerticalAxis.HorizontalLabelPosition.Inside,
                     titleComponent = rememberTextComponent(),
-                    title="Power (Watts)"
+                    title = "Power (Watts)"
                 ),
                 bottomAxis = rememberBottomAxis(
                     guideline = null,
-                    title="Time (Seconds)",
+                    title = "Time (Seconds)",
                     titleComponent = rememberTextComponent(),
                 ),
             ),
@@ -1271,9 +1323,12 @@ fun ChartsScreen(nav: NavHostController, state: AppViewModel) {
                     LineCartesianLayer.LineProvider.series(
                         rememberLine(
                             fill =
-                                remember(batteryPowerChartColors) {
-                                    LineCartesianLayer.LineFill.double(fill(batteryPowerChartColors[0]), fill(batteryPowerChartColors[1]))
-                                }
+                            remember(batteryPowerChartColors) {
+                                LineCartesianLayer.LineFill.double(
+                                    fill(batteryPowerChartColors[0]),
+                                    fill(batteryPowerChartColors[1])
+                                )
+                            }
                         )
                     )
                 ),
@@ -1281,12 +1336,12 @@ fun ChartsScreen(nav: NavHostController, state: AppViewModel) {
                 startAxis = rememberStartAxis(
                     horizontalLabelPosition = VerticalAxis.HorizontalLabelPosition.Inside,
                     titleComponent = rememberTextComponent(),
-                    title="Power (Watts)"
+                    title = "Power (Watts)"
                 ),
                 bottomAxis = rememberBottomAxis(
                     guideline = null,
                     titleComponent = rememberTextComponent(),
-                    title="Time (Seconds)"
+                    title = "Time (Seconds)"
                 ),
                 //marker = rememberMarker(),
             ),
@@ -1413,10 +1468,10 @@ fun ChartsScreen(nav: NavHostController, state: AppViewModel) {
 //        )
         ChartControls(
             autoscroll = state.chartAutoscroll.value,
-            onAutoscrollChanged = {state.chartAutoscroll.value = it},
+            onAutoscrollChanged = { state.chartAutoscroll.value = it },
             xstep = state.chartXStep.value,
-            xstepToString = {secondsToStr(it.toInt() * 6)},
-            onXStepChanged = {state.chartXStep.value = it; zoom = it*6}
+            xstepToString = { secondsToStr(it.toInt() * 6) },
+            onXStepChanged = { state.chartXStep.value = it; zoom = it * 6 }
         )
     }
 }
@@ -1424,33 +1479,44 @@ fun ChartsScreen(nav: NavHostController, state: AppViewModel) {
 @Composable
 fun ChartControls(
     autoscroll: Boolean,
-    onAutoscrollChanged: (value: Boolean)->Unit,
+    onAutoscrollChanged: (value: Boolean) -> Unit,
     xstep: Double,
     xstepToString: (value: Double) -> String,
-    onXStepChanged: (value: Double)-> Unit
+    onXStepChanged: (value: Double) -> Unit
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        var autoscrollExpanded by remember {mutableStateOf(false) }
-        FilledTonalButton(onClick = {autoscrollExpanded = !autoscrollExpanded}) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        var autoscrollExpanded by remember { mutableStateOf(false) }
+        FilledTonalButton(onClick = { autoscrollExpanded = !autoscrollExpanded }) {
             Text("Autoscroll: ${if (autoscroll) "On" else "Off"}")
             Icon(Icons.Filled.ArrowDropDown, null)
         }
-        DropdownMenu(expanded = autoscrollExpanded, onDismissRequest = { autoscrollExpanded = false }) {
-            DropdownMenuItem(onClick = {onAutoscrollChanged(false)}, text={Text("Off")})
-            DropdownMenuItem(onClick = {onAutoscrollChanged(true)}, text={Text("On")})
+        DropdownMenu(
+            expanded = autoscrollExpanded,
+            onDismissRequest = { autoscrollExpanded = false }) {
+            DropdownMenuItem(onClick = { onAutoscrollChanged(false) }, text = { Text("Off") })
+            DropdownMenuItem(onClick = { onAutoscrollChanged(true) }, text = { Text("On") })
         }
 
-        var timePeriodsExpanded by remember {mutableStateOf(false) }
-        var timePeriods = remember{listOf(10, 50, 100, 300, 600, 1200)}
-        FilledTonalButton(onClick = {timePeriodsExpanded = !timePeriodsExpanded}) {
+        var timePeriodsExpanded by remember { mutableStateOf(false) }
+        var timePeriods = remember { listOf(10, 50, 100, 300, 600, 1200) }
+        FilledTonalButton(onClick = { timePeriodsExpanded = !timePeriodsExpanded }) {
             Text("Time Span: ${xstepToString(xstep)}")
             Icon(Icons.Filled.ArrowDropDown, null)
         }
-        DropdownMenu(expanded = timePeriodsExpanded, onDismissRequest = { timePeriodsExpanded = false }) {
+        DropdownMenu(
+            expanded = timePeriodsExpanded,
+            onDismissRequest = { timePeriodsExpanded = false }) {
             timePeriods.forEach {
-                DropdownMenuItem(onClick = { onXStepChanged(it.toDouble()); timePeriodsExpanded = false }, text={Text(
-                    xstepToString(it.toDouble())
-                )})
+                DropdownMenuItem(onClick = {
+                    onXStepChanged(it.toDouble()); timePeriodsExpanded = false
+                }, text = {
+                    Text(
+                        xstepToString(it.toDouble())
+                    )
+                })
             }
         }
     }
@@ -1473,13 +1539,15 @@ fun HistoryScreen(nav: NavHostController, state: AppViewModel) {
     var chargerHistoryMax by remember { mutableStateOf(0.0) }
     var chargerHistoryAvg by remember { mutableStateOf(0.0) }
 
-    var batteryLoading by remember {mutableStateOf(false)}
-    var chargerLoading by remember {mutableStateOf(false)}
-    var zoom by remember {mutableStateOf(state.historyXStep.value * 6) }
-    val batteryMonitor = activity.monitorService?.connections?.find{
-        it.deviceType.value == DeviceType.BatteryMonitor}
-    val solarCharger = activity.monitorService?.connections?.find{
-        it.deviceType.value == DeviceType.SolarCharger}
+    var batteryLoading by remember { mutableStateOf(false) }
+    var chargerLoading by remember { mutableStateOf(false) }
+    var zoom by remember { mutableStateOf(state.historyXStep.value * 6) }
+    val batteryMonitor = activity.monitorService?.connections?.find {
+        it.deviceType.value == DeviceType.BatteryMonitor
+    }
+    val solarCharger = activity.monitorService?.connections?.find {
+        it.deviceType.value == DeviceType.SolarCharger
+    }
 
 
     LaunchedEffect(Unit) {
@@ -1497,17 +1565,17 @@ fun HistoryScreen(nav: NavHostController, state: AppViewModel) {
                     }
                     if (state.chargerHistoryData.isNotEmpty()) {
                         chargerHistoryCount = state.chargerHistoryData.size
-                        chargerHistoryMin = state.chargerHistoryData.minOf{it.value.totalEnergy}
-                        chargerHistoryMax = state.chargerHistoryData.maxOf{it.value.totalEnergy}
+                        chargerHistoryMin = state.chargerHistoryData.minOf { it.value.totalEnergy }
+                        chargerHistoryMax = state.chargerHistoryData.maxOf { it.value.totalEnergy }
                         var sum = 0.0
-                        state.chargerHistoryData.forEach{ sum += it.value.totalEnergy}
+                        state.chargerHistoryData.forEach { sum += it.value.totalEnergy }
                         chargerHistoryAvg = sum / chargerHistoryCount
 
                         chargerHistoryModelProducer.runTransaction {
                             lineSeries {
                                 series(
                                     state.chargerHistoryData.map { -it.key },
-                                    state.chargerHistoryData.map{ it.value.totalEnergy }
+                                    state.chargerHistoryData.map { it.value.totalEnergy }
                                 )
                             }
                         }
@@ -1685,17 +1753,19 @@ fun HistoryScreen(nav: NavHostController, state: AppViewModel) {
                         titleComponent = rememberTextComponent(),
                     ),
                     marker = rememberMarker(),
-                    decorations = listOf(rememberHorizontalLine(
-                        y = { chargerHistoryAvg.toLong().toDouble() },
-                        line = rememberLineComponent(avgColor, 1.dp),
-                        labelComponent =
-                        rememberTextComponent(
-                            margins = Dimensions.of(4.dp),
-                            padding =
-                            Dimensions.of(8.dp, 2.dp),
-                            background = rememberShapeComponent(avgColor, Shape.Pill),
-                        ),
-                    )),
+                    decorations = listOf(
+                        rememberHorizontalLine(
+                            y = { chargerHistoryAvg.toLong().toDouble() },
+                            line = rememberLineComponent(avgColor, 1.dp),
+                            labelComponent =
+                            rememberTextComponent(
+                                margins = Dimensions.of(4.dp),
+                                padding =
+                                Dimensions.of(8.dp, 2.dp),
+                                background = rememberShapeComponent(avgColor, Shape.Pill),
+                            ),
+                        )
+                    ),
                 ),
                 modelProducer = chargerHistoryModelProducer,
                 zoomState = rememberVicoZoomState(zoomEnabled = false, initialZoom = Zoom.x(7.0)),
@@ -1704,29 +1774,30 @@ fun HistoryScreen(nav: NavHostController, state: AppViewModel) {
                     .height(300.dp)
                     .fillMaxWidth()
             )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween){
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column {
-                    Text("Min", style= Typography.labelSmall)
+                    Text("Min", style = Typography.labelSmall)
                     Text(
                         "${"% .0f".format(chargerHistoryMin)}Wh",
                         style = Typography.bodySmall
                     )
                 }
                 Column {
-                    Text("Max", style= Typography.labelSmall)
-                    Text("${"%.0f".format(chargerHistoryMax)}Wh",
+                    Text("Max", style = Typography.labelSmall)
+                    Text(
+                        "${"%.0f".format(chargerHistoryMax)}Wh",
                         style = Typography.bodySmall
                     )
                 }
                 Column {
-                    Text("Avg", style= Typography.labelSmall)
+                    Text("Avg", style = Typography.labelSmall)
                     Text(
                         "${"%.0f".format(chargerHistoryAvg)}Wh",
                         style = Typography.bodySmall
                     )
                 }
                 Column {
-                    Text("Days", style= Typography.labelSmall)
+                    Text("Days", style = Typography.labelSmall)
                     Text(
                         "${chargerHistoryCount}",
                         style = Typography.bodySmall
@@ -1744,7 +1815,7 @@ fun HistoryScreen(nav: NavHostController, state: AppViewModel) {
                     if (chargerLoading) {
                         chargerLoading = false
                     }
-                }, days.toLong()*3000)
+                }, days.toLong() * 3000)
                 solarCharger!!.writeAllCommands(
                     (0..days).map { SolarChargerCommands.loadHistory(it) },
                     2000
@@ -1769,14 +1840,16 @@ fun HistoryScreen(nav: NavHostController, state: AppViewModel) {
                     onClick = {
                         reloadDropdown = true
 
-                   },
+                    },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Reload history")
                     Icon(Icons.Filled.ArrowDropDown, null)
                 }
                 var reloadDaysItems = listOf(7, 14, 30, 60, 90, 120)
-                DropdownMenu(expanded = reloadDropdown, onDismissRequest = {reloadDropdown = false }) {
+                DropdownMenu(
+                    expanded = reloadDropdown,
+                    onDismissRequest = { reloadDropdown = false }) {
                     reloadDaysItems.forEach {
                         DropdownMenuItem(text = { Text("${it} days") }, onClick = {
                             state.batteryHistoryNumberOfDays.value = it
