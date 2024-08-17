@@ -1,1 +1,2 @@
-An app to monitor the battery and charger status of small off grid solar setups over bluetooth.
+Solar is an app to monitor off grid solar setups over bluetooth.
+
