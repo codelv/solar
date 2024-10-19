@@ -91,13 +91,14 @@ data class ModelChangeAction(
 class AppViewModel : ViewModel() {
     var prefs = UserPreferences()
     var solarVoltage = mutableStateOf(0.0)
+    var chargerStatus = mutableStateOf<ChargerStatus?>(null)
     var chargerVoltage = mutableStateOf(0.0)
     var chargerMinVoltage = mutableStateOf(0.0)
     var chargerMaxVoltage = mutableStateOf(0.0)
     var chargerCurrent = mutableStateOf(0.0)
     var chargerTodayEnergy = mutableStateOf(0.0)
     var chargerTotalChargeEnergy = mutableStateOf(0.0)
-    var chargerTemp = mutableStateOf(0)
+
     var solarPeakPower = mutableStateOf(0.0)
     var batteryRemainingAh = mutableStateOf(0.0)
     var batteryCharging = mutableStateOf(false)
@@ -107,6 +108,9 @@ class AppViewModel : ViewModel() {
     var batteryTotalDischargeEnergy = mutableStateOf(0.0)
     var batteryCapacity = mutableStateOf(0.0)
     var batteryTimeRemaining = mutableStateOf(0)
+    var chargerTemp = mutableStateOf<Double?>(null)
+    var batteryTemp = mutableStateOf<Double?>(null)
+    var monitorTemp = mutableStateOf<Double?>(null)
 
     var availableDevices = mutableStateListOf<BluetoothDevice>()
     var connectedDevices = mutableStateListOf<BluetoothDevice>()

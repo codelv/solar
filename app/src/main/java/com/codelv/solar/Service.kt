@@ -111,6 +111,21 @@ data class BluetoothAction(
 
 }
 
+enum class ChargerStatus(val code: Int) {
+    Standby(0x00),
+    Starting(0x01),
+    MPPT(0x02),
+    Equalize(0x03),
+    Boost(0x04),
+    Float(0x05),
+    CurrentLimited(0x06);
+
+    companion object {
+        fun fromInt(value: Int) = ChargerStatus.values().firstOrNull { it.code == value }
+
+    }
+}
+
 enum class SolarChargerDataType(val code: Int) {
     ChargeVoltage(0x01),
     ChargeCurrent(0x02),
@@ -119,11 +134,12 @@ enum class SolarChargerDataType(val code: Int) {
     TodayPeakPower(0x05),
     TodayMinBatteryVoltage(0x06),
     TodayMaxBatteryVoltage(0x07),
-    ChargerTemp(0x09),
-    BatteryTemp(0x0A),
+    ChargerTemp(0x09), // in C
+    BatteryTemp(0x0A), // in C
     TotalChargeEnergy(0x0B),
     TodayDcLoadEnergy(0x0C),
-    HistoryData(0x0D);
+    HistoryData(0x0D),
+    ChargerStatus(0x0E);
 
     companion object {
         fun fromInt(value: Int) = SolarChargerDataType.values().firstOrNull { it.code == value }
@@ -169,7 +185,7 @@ enum class BatteryMonitorDataType(val code: Int) {
     RecordProgressInMinutes(0xd5),
     RemainingTimeInMinutes(0xd6),
     Power(0xd8),
-    TempData(0xd9),
+    TempData(0xd9), // in C
 
     Config(0xe0),
     VersionInfo(0xe2),
@@ -279,6 +295,8 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
     var currentAction: BluetoothAction? = null
     var lastCharacteristicWrite: MutableState<ByteArray> = mutableStateOf(byteArrayOf())
     var lastCharacteristicRead: MutableState<ByteArray> = mutableStateOf(byteArrayOf())
+
+    var isTempInF: Boolean? = null
 
     var readBuffer: ByteArray = byteArrayOf()
 
@@ -815,6 +833,7 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
         // LiTime solar charger
         // Home data is 43 bytes
         // 0103260064010803e701072119000000000000023603af025c000000020000006300056a7200000000ad9a
+        // 0103260064011f089602762115000000000000027f045815e400000004000000b2000bb88600000000367f
         if (data.size == 43 && data.sliceArray(0..2)
                 .contentEquals(byteArrayOf(0x01, 0x03, 0x26))
         ) { // && lastCharacteristicWrite.contentEquals(SolarChargerCommands.HOME_DATA)) {
@@ -826,9 +845,9 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
             sendUpdate(
                 SolarChargerDataType.ChargeCurrent,
                 data.sliceArray(7..8).toHexString().toInt(16).toDouble() / 100
-            )
-            sendUpdate(SolarChargerDataType.ChargerTemp, data[11].toHexString().toInt(16))
-            sendUpdate(SolarChargerDataType.BatteryTemp, data[12].toHexString().toInt(16))
+                )
+            sendUpdate(SolarChargerDataType.ChargerTemp, data[11].toHexString().toInt(16).toDouble())
+            sendUpdate(SolarChargerDataType.BatteryTemp, data[12].toHexString().toInt(16).toDouble())
 
             sendUpdate(
                 SolarChargerDataType.SolarVoltage,
@@ -848,6 +867,9 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                 SolarChargerDataType.TotalChargeEnergy,
                 data.sliceArray(33..36).toHexString().toInt(16).toDouble()
             )
+            sendUpdate(SolarChargerDataType.ChargerStatus, data[28].toHexString().toInt(16))
+
+
             lastUpdated.value = Date()
             return true
         } else if (data.size == 15 && data.sliceArray(0..2)
@@ -1053,6 +1075,23 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                         BatteryMonitorDataType.RecordedVoltage -> {
                             if (entry.size > 0) {
                                 lastVoltage = entry.toHexString().toDouble() / 100
+                            }
+                        }
+                        BatteryMonitorDataType.IsTempInFahrenheit -> {
+                            if (entry.size > 0) {
+                                isTempInF = entry.toHexString().toInt() == 1;
+                            }
+                        }
+                        BatteryMonitorDataType.TempData -> {
+                            if (entry.size > 0 && isTempInF != null) {
+                                val v = entry.toHexString().toInt();
+
+                                // When in C the temp is offset by 100 when in F its offset by 5
+                                val t = if (isTempInF!!)
+                                    ((v.toDouble() - 32 - 5) * 5 / 9)
+                                else v.toDouble() - 100;
+                                intent.putExtra(BATTERY_MONITOR_DATA_VALUE, t)
+
                             }
                         }
 

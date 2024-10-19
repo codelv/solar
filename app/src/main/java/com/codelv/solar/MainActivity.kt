@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -226,7 +227,19 @@ class MainActivity : ComponentActivity() {
 
                         SolarChargerDataType.ChargerTemp -> {
                             state.chargerTemp.value =
-                                intent.getIntExtra(MonitorService.SOLAR_CHARGER_DATA_VALUE, 0)
+                                intent.getDoubleExtra(MonitorService.SOLAR_CHARGER_DATA_VALUE, 0.0)
+                        }
+
+                        SolarChargerDataType.BatteryTemp -> {
+                            state.batteryTemp.value =
+                                intent.getDoubleExtra(MonitorService.SOLAR_CHARGER_DATA_VALUE, 0.0)
+                        }
+
+                        SolarChargerDataType.ChargerStatus -> {
+                            state.chargerStatus.value =
+                                ChargerStatus.fromInt(
+                                    intent.getIntExtra(MonitorService.SOLAR_CHARGER_DATA_VALUE, 0)
+                                )
                         }
 
                         else -> {}
@@ -304,6 +317,12 @@ class MainActivity : ComponentActivity() {
                         BatteryMonitorDataType.RecordedDataStartDate -> {
                             state.lastBatteryRecordStartTime.value = intent.getParcelableExtra(
                                 MonitorService.BATTERY_MONITOR_DATA_VALUE,
+                            )
+                        }
+
+                        BatteryMonitorDataType.TempData -> {
+                            state.monitorTemp.value = intent.getDoubleExtra(
+                                MonitorService.BATTERY_MONITOR_DATA_VALUE, 0.0
                             )
                         }
 
@@ -416,6 +435,25 @@ inline fun <reified Activity : ComponentActivity> Context.getActivity(): Activit
     }
 }
 
+
+fun formatTimeRemaining(timeInMins: Int): String {
+    val hours = timeInMins / 60
+    val minutes = timeInMins % 60
+    if (hours > 48) {
+        var days = hours / 24
+        var h = hours % 24
+        return "${days}d ${h}h"
+    }
+    return "${hours}h ${minutes}min"
+}
+
+fun formatTemp(tempInC: Double?): String {
+    if (tempInC == null) {
+        return "--";
+    }
+    val c = tempInC!!;
+    return "${"%.0f".format(c)}°C | ${"%.0f".format(c * 9.0 / 5.0 + 32)}°F"
+}
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
@@ -787,9 +825,10 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
         Column(
             Modifier
                 .padding(16.dp)
+                .fillMaxHeight(1f)
                 .verticalScroll(rememberScrollState())
         ) {
-            Column(Modifier.padding(8.dp)) {
+            Column(Modifier.padding(5.dp)) {
                 Text(
                     text = "Solar Panels",
                     style = Typography.headlineSmall,
@@ -801,7 +840,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                 ) {
                     Column(
                         Modifier
-                            .padding(8.dp)
+                            .padding(5.dp)
                             .fillMaxWidth()
                             .weight(1f)
                     ) {
@@ -818,7 +857,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                     }
                     Column(
                         Modifier
-                            .padding(8.dp)
+                            .padding(5.dp)
                             .fillMaxWidth()
                             .weight(1f)
                     ) {
@@ -836,7 +875,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                 }
             }
             HorizontalDivider()
-            Column(Modifier.padding(8.dp)) {
+            Column(Modifier.padding(5.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -851,6 +890,12 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                     } else {
                         Icon(Icons.Filled.BluetoothDisabled, null, tint = Color.Red)
                     }
+
+                    Text(
+                        if (state.chargerStatus.value != null) state.chargerStatus.value!!.name else "",
+                        Modifier.padding(5.dp),
+                        style = Typography.labelSmall
+                    )
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -858,7 +903,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                 ) {
                     Column(
                         Modifier
-                            .padding(8.dp)
+                            .padding(5.dp)
                             .fillMaxWidth()
                             .weight(1f)
                     ) {
@@ -884,7 +929,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                     }
                     Column(
                         Modifier
-                            .padding(8.dp)
+                            .padding(5.dp)
                             .fillMaxWidth()
                             .weight(1f)
                     ) {
@@ -900,14 +945,14 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                         )
                         Text("Temperature", style = Typography.labelSmall)
                         Text(
-                            text = "${state.chargerTemp.value}°C | ${"%.0f".format(state.chargerTemp.value.toFloat() * 9.0 / 5.0 + 32)}°F",
+                            text = formatTemp(state.chargerTemp.value),
                             style = Typography.bodyLarge
                         )
                     }
                 }
             }
             HorizontalDivider()
-            Column(Modifier.padding(8.dp)) {
+            Column(Modifier.padding(5.dp)) {
                 Text(
                     text = "Inverter",
                     style = Typography.headlineSmall,
@@ -919,7 +964,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                 ) {
                     Column(
                         Modifier
-                            .padding(8.dp)
+                            .padding(5.dp)
                             .fillMaxWidth()
                             .weight(1f)
                     ) {
@@ -931,7 +976,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                     }
                     Column(
                         Modifier
-                            .padding(8.dp)
+                            .padding(5.dp)
                             .fillMaxWidth()
                             .weight(1f)
                     ) {
@@ -943,7 +988,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                     }
                     Column(
                         Modifier
-                            .padding(8.dp)
+                            .padding(5.dp)
                             .fillMaxWidth()
                             .weight(2f)
                     ) {
@@ -953,9 +998,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                         if (state.inverterCurrent.value > 0 && state.batteryRemainingAh.value > 0) {
                             var remainingTime =
                                 (60 * state.batteryRemainingAh.value / state.inverterCurrent.value).toInt()
-                            val hours = remainingTime / 60
-                            val minutes = remainingTime % 60
-                            text = "${hours}h ${minutes}min"
+                            text = formatTimeRemaining(remainingTime)
                         }
                         Text(
                             text = text,
@@ -964,7 +1007,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                     }
 //                    Column(
 //                        Modifier
-//                            .padding(8.dp)
+//                            .padding(5.dp)
 //                            .fillMaxWidth()
 //                            .weight(2f)
 //                    ) {
@@ -977,7 +1020,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                 }
             }
             HorizontalDivider()
-            Column(Modifier.padding(8.dp)) {
+            Column(Modifier.padding(5.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = "Battery",
@@ -991,7 +1034,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                     }
                     Text(
                         if (state.batteryCharging.value) "Charging" else "Discharging",
-                        Modifier.padding(8.dp),
+                        Modifier.padding(5.dp),
                         style = Typography.labelSmall
                     )
                 }
@@ -1001,7 +1044,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                 ) {
                     Column(
                         Modifier
-                            .padding(8.dp)
+                            .padding(5.dp)
                             .fillMaxWidth()
                             .weight(1f)
                     ) {
@@ -1013,7 +1056,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                     }
                     Column(
                         Modifier
-                            .padding(8.dp)
+                            .padding(5.dp)
                             .fillMaxWidth()
                             .weight(1f)
                     ) {
@@ -1025,7 +1068,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                     }
                     Column(
                         Modifier
-                            .padding(8.dp)
+                            .padding(5.dp)
                             .fillMaxWidth()
                             .weight(1f)
                     ) {
@@ -1039,7 +1082,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                 Row(modifier = Modifier.fillMaxWidth()) {
                     Column(
                         Modifier
-                            .padding(8.dp)
+                            .padding(5.dp)
                             .fillMaxWidth()
                             .weight(1f)
                     ) {
@@ -1056,15 +1099,13 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                     }
                     Column(
                         Modifier
-                            .padding(8.dp)
+                            .padding(5.dp)
                             .fillMaxWidth()
                             .weight(1f)
                     ) {
                         Text("Remaining time", style = Typography.labelSmall)
-                        val hours = state.batteryTimeRemaining.value / 60
-                        val minutes = state.batteryTimeRemaining.value % 60
                         Text(
-                            text = "${hours}h ${minutes}min",
+                            text = formatTimeRemaining( state.batteryTimeRemaining.value),
                             style = Typography.displaySmall
                         )
                         Text("Battery percent", style = Typography.labelSmall)
@@ -1077,7 +1118,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                 Row(modifier = Modifier.fillMaxWidth()) {
                     Column(
                         Modifier
-                            .padding(8.dp)
+                            .padding(5.dp)
                             .fillMaxWidth()
                             .weight(1f)
                     ) {
@@ -1089,7 +1130,7 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                     }
                     Column(
                         Modifier
-                            .padding(8.dp)
+                            .padding(5.dp)
                             .fillMaxWidth()
                             .weight(1f)
                     ) {
@@ -1097,6 +1138,32 @@ fun DashboardScreen(nav: NavHostController, state: AppViewModel) {
                         Text(
                             text = "${"%.3f".format(state.batteryTotalDischargeEnergy.value / 1000)}kWh",
                             style = Typography.headlineSmall
+                        )
+                    }
+                }
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        Modifier
+                            .padding(5.dp)
+                            .fillMaxWidth()
+                            .weight(1f)
+                    ) {
+                        Text("Battery temp", style = Typography.labelSmall)
+                        Text(
+                            text = formatTemp(state.batteryTemp.value),
+                            style = Typography.bodyLarge
+                        )
+                    }
+                    Column(
+                        Modifier
+                            .padding(5.dp)
+                            .fillMaxWidth()
+                            .weight(1f)
+                    ) {
+                        Text("Room temp", style = Typography.labelSmall)
+                        Text(
+                            text = formatTemp(state.monitorTemp.value),
+                            style = Typography.bodyLarge
                         )
                     }
                 }
@@ -1217,7 +1284,7 @@ fun ChartsScreen(nav: NavHostController, state: AppViewModel) {
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(8.dp)
+            .padding(5.dp)
             .verticalScroll(rememberScrollState())
     ) {
         Text(
@@ -1538,6 +1605,7 @@ fun HistoryScreen(nav: NavHostController, state: AppViewModel) {
     var chargerHistoryMin by remember { mutableStateOf(0.0) }
     var chargerHistoryMax by remember { mutableStateOf(0.0) }
     var chargerHistoryAvg by remember { mutableStateOf(0.0) }
+    var chargerHistoryTotal by remember { mutableStateOf(0.0) }
 
     var batteryLoading by remember { mutableStateOf(false) }
     var chargerLoading by remember { mutableStateOf(false) }
@@ -1570,6 +1638,7 @@ fun HistoryScreen(nav: NavHostController, state: AppViewModel) {
                         var sum = 0.0
                         state.chargerHistoryData.forEach { sum += it.value.totalEnergy }
                         chargerHistoryAvg = sum / chargerHistoryCount
+                        chargerHistoryTotal = sum
 
                         chargerHistoryModelProducer.runTransaction {
                             lineSeries {
@@ -1589,7 +1658,7 @@ fun HistoryScreen(nav: NavHostController, state: AppViewModel) {
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(8.dp)
+            .padding(5.dp)
             .verticalScroll(rememberScrollState())
     ) {
 //        if (batteryMonitor != null && batteryMonitor!!.connectionState.value == STATE_CONNECTED) {
@@ -1793,6 +1862,13 @@ fun HistoryScreen(nav: NavHostController, state: AppViewModel) {
                     Text("Avg", style = Typography.labelSmall)
                     Text(
                         "${"%.0f".format(chargerHistoryAvg)}Wh",
+                        style = Typography.bodySmall
+                    )
+                }
+                Column {
+                    Text("Total", style = Typography.labelSmall)
+                    Text(
+                        "${"%.3f".format(chargerHistoryTotal/1000)}kWh",
                         style = Typography.bodySmall
                     )
                 }
