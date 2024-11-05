@@ -1,0 +1,5 @@
+* Show large times as days & hours
+* Display charger battery temp reading
+* Display current charger status (MPPT, Standby, etc..)
+* Show battery monitor temp reading
+* Calculate total kWh from charger history
