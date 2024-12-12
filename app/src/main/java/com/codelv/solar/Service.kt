@@ -847,7 +847,9 @@ class MonitorConnection(val device: BluetoothDevice, val service: MonitorService
                 data.sliceArray(7..8).toHexString().toInt(16).toDouble() / 100
                 )
             sendUpdate(SolarChargerDataType.ChargerTemp, data[11].toHexString().toInt(16).toDouble())
-            sendUpdate(SolarChargerDataType.BatteryTemp, data[12].toHexString().toInt(16).toDouble())
+            // Fix negative temps
+            var t = data[12].toHexString().toInt(16);
+            sendUpdate(SolarChargerDataType.BatteryTemp, (if (t < 128) t else (128-t)).toDouble())
 
             sendUpdate(
                 SolarChargerDataType.SolarVoltage,
